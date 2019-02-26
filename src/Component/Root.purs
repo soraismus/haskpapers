@@ -11,14 +11,14 @@ import Data.Date (Date)
 import Data.Either.Nested (Either3)
 import Data.Foldable (foldl)
 import Data.Functor.Coproduct.Nested (Coproduct3)
-import Data.Int (fromNumber, toNumber)
 import Data.Map (Map)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.String as String
+import Effect (Effect)
 import Effect.Aff.Class (class MonadAff)
-import Effect.Random (randomRange)
+import Effect.Random (randomInt)
 import Halogen as H
 import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
@@ -47,6 +47,7 @@ data RenderAmount = RenderAll | RenderSome
 type StateRec =
   { now :: Date
   , papers :: Array Paper
+  , dailyIndex :: Int
   , authors :: Map Id Author
   , yearMin :: Year
   , yearMax :: Year
@@ -126,15 +127,14 @@ component =
         [ HH.text "Request archive." ]
     ]
   render Loading = HH.text "Loading"
-  render (Loaded stateRec) = view 0 stateRec
+  render (Loaded stateRec) = view stateRec
   render LoadError = HH.text "LoadError"
 
-  convert :: { archive :: Archive, date :: WrappedDate } -> StateRec
-  convert { archive, date } =
-    let (WrappedDate _date) = date
-    in
+  convert :: Int -> { archive :: Archive, date :: WrappedDate } -> StateRec
+  convert index { archive, date: WrappedDate _date } =
     { now: _date
     , authors: archive.authors
+    , dailyIndex: index
     , papers: archive.papers
     , yearMin: archive.yearMin
     , yearMax: archive.yearMax
@@ -155,7 +155,8 @@ component =
   eval (RequestArchive next) = do
      H.put Loading
      maybeResponse <- requestArchive
-     H.put $ maybe LoadError (Loaded <<< convert) maybeResponse
+     randomIndex <- H.liftEffect $ randomInt 0 5
+     H.put $ maybe LoadError (Loaded <<< convert randomIndex) maybeResponse
      pure next
   eval (DisplayArchive archive date next) = pure next
   eval (RenderMore next) = pure next
@@ -184,16 +185,13 @@ view
   => Now m
   => LogMessages m
   => RequestArchive m
-  => Int
-  -> StateRec
+  => StateRec
   -> H.ParentHTML Query ChildQuery ChildSlot m
-view index stateRec@{ papers, visibleIds } =
-  -- index <- H.liftEffect (randomRange (toNumber 0) (toNumber (Array.length papers)))
-  -- index <- randomRange (toNumber 0) (toNumber (Array.length papers))
+view stateRec@{ dailyIndex, papers, visibleIds } =
   HH.div
     [ class_ "container" ]
     [ viewHeader visibleCount
-    , viewPaperOfTheDay index papers
+    , viewPaperOfTheDay dailyIndex papers
     , viewFilters stateRec
     , viewPapers stateRec
     ]
