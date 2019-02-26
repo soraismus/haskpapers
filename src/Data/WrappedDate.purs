@@ -10,6 +10,7 @@ import Data.DateTime (DateTime(..))
 import Data.Either (Either, note)
 import Data.Newtype (class Newtype)
 import Data.RFC3339String (RFC3339String(..), toDateTime)
+import HaskPapers.Data.ToHtmlString (class ToHtmlString, toHtmlString)
 
 newtype WrappedDate = WrappedDate Date
 
@@ -21,6 +22,9 @@ instance decodeJsonWrappedDate :: DecodeJson WrappedDate where
 
 instance showWrappedDate :: Show WrappedDate where
   show (WrappedDate date) = show date
+
+instance toHtmlStringWrappedDate :: ToHtmlString WrappedDate where
+  toHtmlString (WrappedDate date) = show date
 
 fromString :: String -> Either String WrappedDate
 fromString = 

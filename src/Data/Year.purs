@@ -11,6 +11,7 @@ import Data.Argonaut.Encode (class EncodeJson)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Maybe (Maybe(..))
+import HaskPapers.Data.ToHtmlString (class ToHtmlString, toHtmlString)
 
 newtype Year = Year Int
 
@@ -22,6 +23,9 @@ derive newtype instance encodeJsonYear :: EncodeJson Year
 
 instance showYear :: Show Year where
   show = genericShow
+
+instance toHtmlStringYear :: ToHtmlString Year where
+  toHtmlString (Year int) = show int
 
 toInt :: Year -> Int
 toInt (Year int) = int

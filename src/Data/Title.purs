@@ -11,6 +11,7 @@ import Data.Argonaut.Encode (class EncodeJson)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Maybe (Maybe(..))
+import HaskPapers.Data.ToHtmlString (class ToHtmlString, toHtmlString)
 
 newtype Title = Title String
 
@@ -22,6 +23,9 @@ derive newtype instance decodeJsonTitle :: DecodeJson Title
 
 instance showTitle :: Show Title where
   show = genericShow
+
+instance toHtmlStringTitle :: ToHtmlString Title where
+  toHtmlString (Title str) = str
 
 parse :: String -> Maybe Title
 parse "" = Nothing

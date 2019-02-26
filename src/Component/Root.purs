@@ -39,6 +39,7 @@ import HaskPapers.Data.Id (Id)
 import HaskPapers.Data.Link (Link)
 import HaskPapers.Data.Paper (Paper)
 import HaskPapers.Data.Title (Title)
+import HaskPapers.Data.ToHtmlString (toHtmlString)
 import HaskPapers.Data.Year (Year, toInt)
 import HaskPapers.Data.WrappedDate (WrappedDate(..))
 
@@ -411,12 +412,12 @@ viewTitle title maybeLink maybeFilter =
     [ linkNode ]
   where
     titleNode = maybe
-      (HH.text $ show title)
-      (\filter -> HH.text $ show title)
+      (HH.text $ toHtmlString title)
+      (\filter -> HH.text $ toHtmlString title)
       maybeFilter
     linkNode = maybe
       titleNode
-      (\link -> HH.a [class_ "link", HP.href $ show link] [titleNode])
+      (\link -> HH.a [class_ "link", HP.href $ toHtmlString link] [titleNode])
       maybeLink
 
 viewEditLink
@@ -487,7 +488,7 @@ viewYearMaybe
   => Maybe Year
   -> H.ParentHTML Query ChildQuery ChildSlot m
 viewYearMaybe maybeYear =
-  maybe (HH.text "") (\year -> HH.text $ " [" <> show year <> "] ") maybeYear
+  maybe (HH.text "") (\year -> HH.text $ " [" <> toHtmlString year <> "] ") maybeYear
 
 viewCitations
   :: forall m r
