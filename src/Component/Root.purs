@@ -154,13 +154,17 @@ component =
 
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void m
   eval (RequestArchive next) = do
-     H.put Loading
-     maybeResponse <- requestArchive
-     randomIndex <- H.liftEffect $ randomInt 0 5
-     H.put $ maybe LoadError (Loaded <<< convert randomIndex) maybeResponse
-     pure next
+    H.put Loading
+    maybeResponse <- requestArchive
+    randomIndex <- H.liftEffect $ randomInt 0 5
+    H.put $ maybe LoadError (Loaded <<< convert randomIndex) maybeResponse
+    pure next
   eval (DisplayArchive archive date next) = pure next
-  eval (RenderMore next) = pure next
+  eval (RenderMore next) = do
+    H.modify_ (\state -> case state of
+      Loaded stateRec -> Loaded (stateRec { renderAmount = RenderAll })
+      otherwise -> state)
+    pure next
   eval (TitleFilter string next) = pure next
   eval (AuthorFilter string next) = pure next
   eval (AuthorFacetAdd next) = pure next
@@ -192,6 +196,11 @@ view stateRec@{ dailyIndex, papers, visibleIds } =
   HH.div
     [ class_ "container" ]
     [ viewHeader visibleCount
+    , HH.button
+      [ class_ "btn btn-outline-danger"
+      , HE.onClick (HE.input_ RenderMore)
+      ]
+      [ HH.text "Render more" ]
     , viewPaperOfTheDay dailyIndex papers
     , viewFilters stateRec
     , viewPapers stateRec
