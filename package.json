@@ -1,8 +1,8 @@
 {
   "private": true,
   "scripts": {
-    "build": "pulp build --to dist/app.js",
-    "watch": "pulp -w build --to dist/app.js",
+    "build": "pulp browserify --to dist/app.js",
+    "watch": "pulp -w browserify --to dist/app.js",
     "build-serve": "pulp --then 'parcel build assets/index.html && http-server dist' build --to dist/app.js",
     "watch-fast": "webpack --mode=development --entry ./entry.js --output-path ./dist --output-filename app.js --progress --watch",
     "serve": "http-server dist"
