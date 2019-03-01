@@ -9,7 +9,7 @@ import Data.Array as Array
 import Data.Array ((!!))
 import Data.Date (Date)
 import Data.Either.Nested (Either3)
-import Data.Foldable (foldl)
+import Data.Foldable (foldl, for_)
 import Data.Functor.Coproduct.Nested (Coproduct3)
 import Data.Map (Map)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
@@ -25,6 +25,10 @@ import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import HaskPapers.Capability.ManageNoUiSlider
+  ( class ManageNoUiSlider
+  , createNoUiSlider
+  )
 import HaskPapers.Capability.LogMessages (class LogMessages)
 import HaskPapers.Capability.Now (class Now)
 import HaskPapers.Capability.RequestArchive
@@ -43,6 +47,7 @@ import HaskPapers.Data.Title (Title)
 import HaskPapers.Data.ToHtmlString (toHtmlString)
 import HaskPapers.Data.Year (Year, toInt)
 import HaskPapers.Data.WrappedDate (WrappedDate(..))
+import HaskPapers.Foreign.NoUiSlider (CreateNoUiSlider)
 
 data RenderAmount = RenderAll | RenderSome
 
@@ -105,6 +110,7 @@ type ChildSlot = Either3 Unit Unit Unit
 component
   :: forall m
    . MonadAff m
+  => ManageNoUiSlider m
   => Now m
   => LogMessages m
   => RequestArchive m
@@ -153,12 +159,33 @@ component =
       }
     }
 
+  getStateRecMaybe :: State -> Maybe StateRec
+  getStateRecMaybe = case _ of
+                          Loaded stateRec -> Just stateRec
+                          _               -> Nothing
+
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void m
   eval (RequestArchive next) = do
     H.put Loading
     maybeResponse <- requestArchive
     randomIndex <- H.liftEffect $ randomInt 0 5
     H.put $ maybe LoadError (Loaded <<< convert randomIndex) maybeResponse
+    state <- H.get
+    for_ (getStateRecMaybe state) \stateRec -> do
+       let min = toInt stateRec.yearMin
+       let max = (toInt stateRec.yearMax) + 1
+       createNoUiSlider
+         { id: "year-slider"
+         , start: [min, max]
+         , margin: Just 1
+         , limit: Nothing
+         , connect: Just true
+         , direction: Nothing
+         , orientation: Nothing
+         , behavior: Nothing
+         , step: Just 1
+         , range: Just { min, max }
+         }
     pure next
   eval (DisplayArchive archive date next) = pure next
   eval (RenderMore next) = do
