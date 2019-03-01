@@ -159,11 +159,6 @@ component =
       }
     }
 
-  getStateRecMaybe :: State -> Maybe StateRec
-  getStateRecMaybe = case _ of
-                          Loaded stateRec -> Just stateRec
-                          _               -> Nothing
-
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void m
   eval (RequestArchive next) = do
     H.put Loading
@@ -211,6 +206,11 @@ component =
 --    when (route /= destination) do
 --      H.modify_ _ { route = destination }
 --    pure a
+
+getStateRecMaybe :: State -> Maybe StateRec
+getStateRecMaybe = case _ of
+  Loaded stateRec -> Just stateRec
+  _               -> Nothing
 
 view
   :: forall m
