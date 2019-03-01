@@ -1,4 +1,7 @@
 "use strict";
+var Data_Maybe = require('../Data.Maybe/index.js');
+var noUiSlider = require('nouislider');
+var wNumb      = require('wnumb');
 
 var _exports = (function () {
   var created = false;
@@ -12,14 +15,10 @@ var _exports = (function () {
         requestAnimationFrame(function () {
           slider = document.getElementById(spec.id);
 
-          var Data_Maybe = require('../Data.Maybe/index.js');
-          var noUiSlider = require('nouislider');
-          var wNumb      = require('wnumb');
-
-          var nothing = Data_Maybe.Nothing.value;
-
           var fromMaybe = function (maybe) {
-            return maybe === nothing ? undefined : maybe;
+            return (maybe instanceof Data_Maybe.Nothing)
+              ? undefined
+              : maybe.value0;
           }
 
           var decimalFormat = wNumb({ decimals: 0 });
