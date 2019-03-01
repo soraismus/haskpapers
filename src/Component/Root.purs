@@ -19,6 +19,7 @@ import Data.String as String
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff)
 import Effect.Random (randomInt)
+import Effect.Timer (setTimeout)
 import Halogen as H
 import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
