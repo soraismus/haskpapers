@@ -188,17 +188,14 @@ component =
   eval (AuthorFacetAdd_ string next) = pure next
   eval (AuthorFacetRemove string next) = pure next
   eval (YearFilter yearMin yearMax next) = pure next
-  eval (UpdateAccToSlider sliderYears reply) =
-    case sliderYears of
-      [min, max] -> do
-        logDebug ("UpdateAccToSlider -- " <> show sliderYears)
-        dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
-        logDebug $ show dailyIndex
-        H.modify_ (\state -> case state of
-          Loaded stateRec -> Loaded (stateRec { dailyIndex = 0 })
-          otherwise -> state)
-        pure $ reply (if max == 2005 then H.Done else H.Listening)
-      _ -> pure $ reply H.Done
+  eval (UpdateAccToSlider sliderYears reply) = do
+    logDebug ("UpdateAccToSlider -- " <> show sliderYears)
+    dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
+    logDebug $ show dailyIndex
+    H.modify_ (\state -> case state of
+      Loaded stateRec -> Loaded (stateRec { dailyIndex = 0 })
+      otherwise -> state)
+    pure $ reply H.Listening
 
 convert :: Int -> { archive :: Archive, date :: WrappedDate } -> StateRec
 convert index { archive, date: WrappedDate _date } =
@@ -503,7 +500,6 @@ padLeft3 str
   | String.length str == 2 = "0" <> str
   | otherwise       = str
 
--- NB: parentheses, not braces
 class_ :: forall r i. String -> HH.IProp ( class :: String | r ) i
 class_ = HP.class_ <<< HH.ClassName
 

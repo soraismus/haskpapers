@@ -1,23 +1,31 @@
 "use strict";
-var Data_Maybe = require('../Data.Maybe/index.js');
-// var slider = require('nouislider');
-// var wNumb = require('wnumb');
 
 function configureSlider(sliderElement, spec, consumeInts) {
   if (sliderElement.noUiSlider == null) {
     initializeSlider(sliderElement, spec);
   }
 
+  var Data_Tuple = require('../Data.Tuple/index.js');
+
+  var createTuple = Data_Tuple.Tuple.create;
   var updateEvent = 'update';
 
-  // sliderElement.noUiSlider.off(updateEvent);
+  var toTuple = function (array) {
+    if (array.length === 2) {
+      return createTuple(array[0])(array[1]);
+    } else {
+      throw new Error("Invalid number of NoUiSlider updated values.");j:w
+    }
+  }
 
   sliderElement.noUiSlider.on(
     updateEvent,
-    function (values, handle, unencoded, tap, positions) {
-      consumeInts(values.map(function (x) {
+    function (stringValues, handle, unencoded, tap, positions) {
+      var effect = consumeInts(toTuple(stringValues.map(function (x) {
         return parseInt(x, 10);
-      }))();
+      })));
+
+      effect();
     });
 
   return function () {
@@ -26,10 +34,18 @@ function configureSlider(sliderElement, spec, consumeInts) {
 }
 
 function initializeSlider(sliderElement, spec) {
+  var Data_Maybe = require('../Data.Maybe/index.js');
   var slider = require('nouislider');
   var wNumb = require('wnumb');
 
+  var Nothing = Data_Maybe.Nothing;
   var decimalFormat = wNumb({ decimals: 0 });
+
+  var fromMaybe = function (maybe) {
+    return (maybe instanceof Nothing)
+      ? undefined
+      : maybe.value0;
+  }
 
   slider.create(
     sliderElement,
@@ -52,12 +68,6 @@ function initializeSlider(sliderElement, spec) {
       }
     }
   );
-}
-
-function fromMaybe(maybe) {
-  return (maybe instanceof Data_Maybe.Nothing)
-    ? undefined
-    : maybe.value0;
 }
 
 function onSliderUpdate(spec) {

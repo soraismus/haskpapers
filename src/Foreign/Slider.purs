@@ -24,7 +24,7 @@ type Slider =
   , range       :: Maybe { min :: Int, max :: Int }
   }
 
-type SliderYears = Array Int
+type SliderYears = Tuple Year Year
 
 foreign import onSliderUpdate
   :: Slider
