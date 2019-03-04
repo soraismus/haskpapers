@@ -145,13 +145,8 @@ component =
       Nothing       -> H.put LoadError *> pure next
   eval (DisplayArchive archive date next) = pure next
   eval (RenderMore next) = do
-    H.modify_ $ mapState \stateRec ->
-      let filters = stateRec.filters { renderAmount = RenderAll }
-      in
-        (stateRec
-          { selectedPapers = filter filters stateRec.papers
-          , filters = filters
-          })
+    H.modify_ $ updateForFilters \stateRec ->
+      stateRec.filters { renderAmount = RenderAll }
     pure next
   eval (TitleFilter string next) = pure next
   eval (AuthorFilter string next) = pure next
@@ -161,23 +156,13 @@ component =
   eval (YearFilter minYear maxYear next) = pure next
   eval (UpdateAccToSlider sliderYears@(Tuple minYear maxYear) reply) = do
     logDebug ("UpdateAccToSlider -- " <> show sliderYears)
-    H.modify_ $ mapState \stateRec ->
-      let filters = stateRec.filters { minYear = minYear, maxYear = maxYear }
-      in
-        (stateRec
-          { selectedPapers = filter filters stateRec.papers
-          , filters = filters
-          })
+    H.modify_ $ updateForFilters \stateRec ->
+      stateRec.filters { minYear = minYear, maxYear = maxYear }
     pure $ reply H.Listening
   eval (SetIncludeUnknown includeUnknown next) = do
     logDebug $ "SetIncludeUnknown " <> show includeUnknown
-    H.modify_ $ mapState \stateRec ->
-      let filters = stateRec.filters { includeUnknown = includeUnknown }
-      in
-        (stateRec
-          { selectedPapers = filter filters stateRec.papers
-          , filters = filters
-          })
+    H.modify_ $ updateForFilters \stateRec ->
+      stateRec.filters { includeUnknown = includeUnknown }
     pure next
 
   evalResponse
@@ -262,6 +247,32 @@ isSelected { includeUnknown, minYear, maxYear } paper =
 mapState :: (StateRec -> StateRec) -> State -> State
 mapState f (Loaded stateRec) = Loaded $ f stateRec
 mapState f state             = state
+
+updateForFilters
+  :: (  StateRec
+     -> { title :: String
+        , titleIds :: Set Id
+        , author :: String
+        , authorIds :: Set Id
+        , includeUnknown :: Boolean
+        , minYear :: Year
+        , maxYear :: Year
+        , renderAmount :: RenderAmount
+        }
+     )
+  -> State
+  -> State
+updateForFilters getFilters state =
+  mapState
+    (\stateRec ->
+      let
+        filters = getFilters stateRec
+      in
+        stateRec
+          { selectedPapers = filter filters stateRec.papers
+          , filters = filters
+          })
+    state
 
 view
   :: forall m
