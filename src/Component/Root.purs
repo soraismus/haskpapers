@@ -66,6 +66,7 @@ type StateRec =
   , authorFacets :: Array { name :: String, titleIds :: Set Id }
   , visibleIds :: Set Id
   , renderAmount :: RenderAmount
+  , selectedPapers :: Array Paper 
   , filters ::
       { title :: String
       , titleIds :: Set Id
@@ -168,7 +169,10 @@ component =
   eval (UpdateAccToSlider sliderYears@(Tuple minYear maxYear) reply) = do
     logDebug ("UpdateAccToSlider -- " <> show sliderYears)
     H.modify_ (\state -> case state of
-      Loaded stateRec -> Loaded (stateRec { filters { yearMin = minYear, yearMax = maxYear } })
+      Loaded stateRec -> Loaded (stateRec 
+                                { selectedPapers = filter minYear maxYear stateRec.papers
+                                , filters { yearMin = minYear , yearMax = maxYear }
+                                })
       otherwise -> state)
     dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
     logDebug $ show dailyIndex
@@ -218,6 +222,7 @@ convert index { archive, date: WrappedDate _date } =
   , authorFacets: []
   , renderAmount: RenderSome
   , visibleIds: Set.empty
+  , selectedPapers: archive.papers
   , filters:
     { title: ""
     , titleIds: Set.empty
@@ -415,7 +420,7 @@ viewPapers
   => Now m
   => LogMessages m
   => RequestArchive m
-  => { papers :: Array Paper
+  => { selectedPapers :: Array Paper
      , renderAmount :: RenderAmount
      , visibleIds :: Set Id
      , filters
@@ -431,25 +436,19 @@ viewPapers
 viewPapers record =
   HH.ul
     [ class_ "paper-list" ]
-    (map (viewPaper record) (select record.papers))
+    (map (viewPaper record) (select record.selectedPapers))
   where
-    min :: Year
-    min = record.filters.yearMin
-
-    max :: Year
-    max = record.filters.yearMax
-
-    isSelected :: Paper -> Boolean
-    isSelected paper =
-      maybe true (\year -> year >= min && year <= max) paper.yearMaybe
-
-    filter :: Array Paper -> Array Paper
-    filter = Array.filter isSelected
-
     select :: Array Paper -> Array Paper
     select = case record.renderAmount of
-      RenderAll  -> filter
-      RenderSome -> Array.take 25 <<< filter
+      RenderAll  -> identity
+      RenderSome -> Array.take 25
+
+isSelected :: Year -> Year -> Paper -> Boolean
+isSelected minYear maxYear paper =
+  maybe true (\year -> year >= minYear && year <= maxYear) paper.yearMaybe
+
+filter :: Year -> Year -> Array Paper -> Array Paper
+filter minYear maxYear = Array.filter $ isSelected minYear maxYear
 
 viewPaper
   :: forall m r0 r1
