@@ -21,6 +21,9 @@ derive instance genericYear :: Generic Year _
 derive newtype instance decodeJsonYear :: DecodeJson Year
 derive newtype instance encodeJsonYear :: EncodeJson Year
 
+instance ordYear :: Ord Year where
+  compare (Year x) (Year y) = compare x y
+
 instance showYear :: Show Year where
   show = genericShow
 

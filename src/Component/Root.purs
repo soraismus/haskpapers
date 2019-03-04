@@ -71,8 +71,8 @@ type StateRec =
       , titleIds :: Set Id
       , author :: String
       , authorIds :: Set Id
-      , yearMin :: Int
-      , yearMax :: Int
+      , yearMin :: Year
+      , yearMax :: Year
       }
   }
 
@@ -165,8 +165,11 @@ component =
   eval (AuthorFacetAdd_ string next) = pure next
   eval (AuthorFacetRemove string next) = pure next
   eval (YearFilter yearMin yearMax next) = pure next
-  eval (UpdateAccToSlider sliderYears reply) = do
+  eval (UpdateAccToSlider sliderYears@(Tuple minYear maxYear) reply) = do
     logDebug ("UpdateAccToSlider -- " <> show sliderYears)
+    H.modify_ (\state -> case state of
+      Loaded stateRec -> Loaded (stateRec { filters { yearMin = minYear, yearMax = maxYear } })
+      otherwise -> state)
     dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
     logDebug $ show dailyIndex
     pure $ reply H.Listening
@@ -220,8 +223,8 @@ convert index { archive, date: WrappedDate _date } =
     , titleIds: Set.empty
     , author: ""
     , authorIds: Set.empty
-    , yearMin: toInt archive.yearMin
-    , yearMax: toInt archive.yearMax
+    , yearMin: archive.yearMin
+    , yearMax: archive.yearMax
     }
   }
 
@@ -415,7 +418,13 @@ viewPapers
   => { papers :: Array Paper
      , renderAmount :: RenderAmount
      , visibleIds :: Set Id
-     , filters :: { title :: String, author :: String | r1 }
+     , filters
+         :: { title :: String
+            , author :: String
+            , yearMin :: Year
+            , yearMax :: Year
+            | r1
+            }
      | r0
      }
   -> H.ParentHTML Query ChildQuery ChildSlot m
@@ -424,10 +433,23 @@ viewPapers record =
     [ class_ "paper-list" ]
     (map (viewPaper record) (select record.papers))
   where
+    min :: Year
+    min = record.filters.yearMin
+
+    max :: Year
+    max = record.filters.yearMax
+
+    isSelected :: Paper -> Boolean
+    isSelected paper =
+      maybe true (\year -> year >= min && year <= max) paper.yearMaybe
+
+    filter :: Array Paper -> Array Paper
+    filter = Array.filter isSelected
+
     select :: Array Paper -> Array Paper
     select = case record.renderAmount of
-      RenderAll  -> identity
-      RenderSome -> Array.slice 0 25
+      RenderAll  -> filter
+      RenderSome -> Array.take 25 <<< filter
 
 viewPaper
   :: forall m r0 r1
