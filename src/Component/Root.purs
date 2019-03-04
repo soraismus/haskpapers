@@ -7,25 +7,20 @@ import Prelude
 
 import Data.Array as Array
 import Data.Array ((!!))
-import Data.Date (Date, canonicalDate, diff)
-import Data.Date.Component (Month(..))
+import Data.Date (Date)
 import Data.Either.Nested (Either3)
-import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (foldl, for_)
 import Data.Functor.Coproduct.Nested (Coproduct3)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
-import Data.Int (fromNumber)
 import Data.Map (Map)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.String as String
-import Data.Time.Duration (Days(..))
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff)
-import Effect.Random (randomInt)
 import Effect.Timer (setTimeout)
 import Halogen as H
 import Halogen.Component.ChildPath as CP
@@ -34,7 +29,7 @@ import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Query.EventSource (eventSource')
 import HaskPapers.Capability.LogMessages (class LogMessages, logDebug)
-import HaskPapers.Capability.Now (class Now, nowDate)
+import HaskPapers.Capability.Now (class Now)
 import HaskPapers.Capability.RequestArchive
   ( class RequestArchive
   , requestArchive
@@ -42,6 +37,7 @@ import HaskPapers.Capability.RequestArchive
 import HaskPapers.Component.ComponentA as CA
 import HaskPapers.Component.ComponentB as CB
 import HaskPapers.Component.ComponentC as CC
+import HaskPapers.Component.Utils (getDailyIndex)
 import HaskPapers.Data.Archive (Archive)
 import HaskPapers.Data.Author (Author)
 import HaskPapers.Data.Id (Id)
@@ -187,8 +183,8 @@ component =
     -> a
     -> H.ParentDSL State Query ChildQuery ChildSlot Void m a
   evalResponse response next = do
-    let paperNbr = Array.length response.archive.papers
-    dailyIndex <- nowDate >>= (pure <<< fromMaybe 0 <<< getIndexMaybe paperNbr)
+    let paperCount = Array.length response.archive.papers
+    dailyIndex <- getDailyIndex paperCount
     let stateRec = convert dailyIndex response
     H.put $ Loaded stateRec
     let min = toInt stateRec.yearMin
@@ -581,20 +577,3 @@ viewCitations
   -> H.ParentHTML Query ChildQuery ChildSlot m
 viewCitations citations =
   HH.text $ " (cited by " <> show (Array.length citations) <> ")"
-
-getDateDiffMaybe :: Date -> Maybe Days
-getDateDiffMaybe date = do
-  baseDate <- maybeBaseDate
-  pure $ diff date baseDate
-
-getIndexMaybe :: Int -> Date -> Maybe Int
-getIndexMaybe max date = do
-  Days number <- getDateDiffMaybe date
-  int <- fromNumber number
-  pure $ int `mod` max
-
-maybeBaseDate :: Maybe Date
-maybeBaseDate = do
-  year <- toEnum 2019
-  day <- toEnum 1
-  pure $ canonicalDate year January day
