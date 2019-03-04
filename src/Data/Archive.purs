@@ -24,8 +24,8 @@ type Archive =
   , authors :: Map Id Author
   , links :: Map Id Link
   , authorsIndex :: Map Id (Set Id)
-  , yearMin :: Year
-  , yearMax :: Year
+  , minYear :: Year
+  , maxYear :: Year
   , papers :: Array Paper
   }
 
@@ -44,11 +44,11 @@ papersKey = "d"
 titlesKey :: String
 titlesKey = "a"
 
-yearMaxKey :: String
-yearMaxKey = "g"
+maxYearKey :: String
+maxYearKey = "g"
 
-yearMinKey :: String
-yearMinKey = "f"
+minYearKey :: String
+minYearKey = "f"
 
 decodeArchive :: Json -> Either String Archive
 decodeArchive json = do
@@ -57,16 +57,16 @@ decodeArchive json = do
   authors      <- obj .: authorsKey
   links        <- obj .: linksKey
   authorsIndex <- obj .: authorsIndexKey
-  yearMin      <- obj .: yearMinKey
-  yearMax      <- obj .: yearMaxKey
+  minYear      <- obj .: minYearKey
+  maxYear      <- obj .: maxYearKey
   papers       <- tryGetPapers papersKey titles authors links obj
   pure
     { titles
     , authors
     , links
     , authorsIndex
-    , yearMin
-    , yearMax
+    , minYear
+    , maxYear
     , papers
     }
 

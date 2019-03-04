@@ -9,7 +9,6 @@ import Data.Array as Array
 import Data.Array ((!!))
 import Data.Date (Date)
 import Data.Either.Nested (Either3)
-import Data.Foldable (foldl, for_)
 import Data.Functor.Coproduct.Nested (Coproduct3)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
@@ -19,12 +18,14 @@ import Data.Set (Set)
 import Data.Set as Set
 import Data.String as String
 import Data.Tuple (Tuple(..))
+import DOM.HTML.Indexed.InputType as InputType
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff)
 import Effect.Timer (setTimeout)
 import Halogen as H
 import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
+import Halogen.HTML.Core (toPropValue)
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Query.EventSource (eventSource')
@@ -61,11 +62,10 @@ type StateRec =
   , papers :: Array Paper
   , dailyIndex :: Int
   , authors :: Map Id Author
-  , yearMin :: Year
-  , yearMax :: Year
+  , overallMinYear :: Year
+  , overallMaxYear :: Year
   , authorFacets :: Array { name :: String, titleIds :: Set Id }
   , visibleIds :: Set Id
-  , renderAmount :: RenderAmount
   , selectedPapers :: Array Paper 
   , filters ::
       { title :: String
@@ -73,8 +73,9 @@ type StateRec =
       , author :: String
       , authorIds :: Set Id
       , includeUnknown :: Boolean
-      , yearMin :: Year
-      , yearMax :: Year
+      , minYear :: Year
+      , maxYear :: Year
+      , renderAmount :: RenderAmount
       }
   }
 
@@ -100,6 +101,7 @@ data Query a
   | AuthorFacetRemove String a
   | YearFilter Year Year a
   | UpdateAccToSlider SliderYears (H.SubscribeStatus -> a)
+  | SetIncludeUnknown Boolean a
 
 type ChildQuery = Coproduct3 CA.Query CB.Query CC.Query
 
@@ -143,21 +145,40 @@ component =
       Nothing       -> H.put LoadError *> pure next
   eval (DisplayArchive archive date next) = pure next
   eval (RenderMore next) = do
-    H.modify_ $ mapState (_ { renderAmount = RenderAll })
+    H.modify_ $ mapState \stateRec ->
+      let filters = stateRec.filters { renderAmount = RenderAll }
+      in
+        (stateRec
+          { selectedPapers = filter filters stateRec.papers
+          , filters = filters
+          })
     pure next
   eval (TitleFilter string next) = pure next
   eval (AuthorFilter string next) = pure next
   eval (AuthorFacetAdd next) = pure next
   eval (AuthorFacetAdd_ string next) = pure next
   eval (AuthorFacetRemove string next) = pure next
-  eval (YearFilter yearMin yearMax next) = pure next
+  eval (YearFilter minYear maxYear next) = pure next
   eval (UpdateAccToSlider sliderYears@(Tuple minYear maxYear) reply) = do
     logDebug ("UpdateAccToSlider -- " <> show sliderYears)
-    H.modify_ $ mapState \stateRec -> (stateRec
-      { selectedPapers = filter stateRec.filters stateRec.papers
-      , filters { yearMin = minYear, yearMax = maxYear }
-      })
+    H.modify_ $ mapState \stateRec ->
+      let filters = stateRec.filters { minYear = minYear, maxYear = maxYear }
+      in
+        (stateRec
+          { selectedPapers = filter filters stateRec.papers
+          , filters = filters
+          })
     pure $ reply H.Listening
+  eval (SetIncludeUnknown includeUnknown next) = do
+    logDebug $ "SetIncludeUnknown " <> show includeUnknown
+    H.modify_ $ mapState \stateRec ->
+      let filters = stateRec.filters { includeUnknown = includeUnknown }
+      in
+        (stateRec
+          { selectedPapers = filter filters stateRec.papers
+          , filters = filters
+          })
+    pure next
 
   evalResponse
     :: forall a
@@ -169,10 +190,9 @@ component =
     dailyIndex <- getDailyIndex paperCount
     let stateRec = convert dailyIndex response
     H.put $ Loaded stateRec
-    let min = toInt stateRec.yearMin
-    let max = (toInt stateRec.yearMax) + 1
-    let id = "year-slider"
-    let slider = { id
+    let min = toInt stateRec.overallMinYear
+    let max = (toInt stateRec.overallMaxYear) + 1
+    let slider = { id: "year-slider"
                  , start: [min, max]
                  , margin: Just 1
                  , limit: Nothing
@@ -195,10 +215,9 @@ convert index { archive, date: WrappedDate _date } =
   , authors: archive.authors
   , dailyIndex: index
   , papers: archive.papers
-  , yearMin: archive.yearMin
-  , yearMax: archive.yearMax
+  , overallMinYear: archive.minYear
+  , overallMaxYear: archive.maxYear
   , authorFacets: []
-  , renderAmount: RenderSome
   , visibleIds: Set.empty
   , selectedPapers: archive.papers
   , filters:
@@ -207,10 +226,38 @@ convert index { archive, date: WrappedDate _date } =
     , author: ""
     , authorIds: Set.empty
     , includeUnknown: false
-    , yearMin: archive.yearMin
-    , yearMax: archive.yearMax
+    , minYear: archive.minYear
+    , maxYear: archive.maxYear
+    , renderAmount: RenderSome
     }
   }
+
+filter
+  :: forall r
+   . { includeUnknown :: Boolean
+     , minYear :: Year
+     , maxYear :: Year
+     , renderAmount :: RenderAmount
+     | r
+     }
+  -> Array Paper
+  -> Array Paper
+filter record@{ renderAmount } = case renderAmount of
+    RenderSome -> _filter <<< Array.take 25
+    RenderAll  -> _filter
+  where
+    _filter = Array.filter $ isSelected record
+
+isSelected
+  :: forall r
+   . { includeUnknown :: Boolean, minYear :: Year, maxYear :: Year | r }
+  -> Paper
+  -> Boolean
+isSelected { includeUnknown, minYear, maxYear } paper =
+  maybe
+    includeUnknown
+    (\year -> year >= minYear && year <= maxYear)
+    paper.yearMaybe
 
 mapState :: (StateRec -> StateRec) -> State -> State
 mapState f (Loaded stateRec) = Loaded $ f stateRec
@@ -224,10 +271,10 @@ view
   => RequestArchive m
   => StateRec
   -> H.ParentHTML Query ChildQuery ChildSlot m
-view stateRec@{ dailyIndex, papers, visibleIds } =
+view stateRec@{ dailyIndex, papers, selectedPapers } =
   HH.div
     [ class_ "container" ]
-    [ viewHeader visibleCount'
+    [ viewHeader $ Array.length selectedPapers
     , HH.button
       [ class_ "btn btn-outline-danger"
       , HE.onClick (HE.input_ RenderMore)
@@ -237,15 +284,6 @@ view stateRec@{ dailyIndex, papers, visibleIds } =
     , viewFilters stateRec
     , viewPapers stateRec
     ]
-  where
-    visibleCount' = Array.length papers
-    visibleCount = foldl
-      (\count paper ->
-        if Set.member paper.titleId visibleIds
-          then count + 1
-          else count)
-      0
-      papers
 
 viewHeader
   :: forall m
@@ -286,8 +324,26 @@ viewFilters { authorFacets, filters } =
     [ viewTitleSearchBox filters.title
     , viewAuthorSearchBox filters.author
     , viewAuthorFacets $ map _.name authorFacets
+    , viewIncludeUnknown
     , HH.div [ HP.id_ "year-slider" ] []
     ]
+
+viewIncludeUnknown
+  :: forall m
+   . MonadAff m
+  => Now m
+  => LogMessages m
+  => RequestArchive m
+  => H.ParentHTML Query ChildQuery ChildSlot m
+viewIncludeUnknown = HH.div
+  [ class_ "include-unknown" ]
+  [ HH.input
+    [ class_ "include-unknown-checkbox"
+    , HP.type_ InputType.InputCheckbox
+    , HE.onChecked (HE.input SetIncludeUnknown)
+    ]
+  , HH.text "Include papers with unknown year of publication "
+  ]
 
 viewTitleSearchBox
   :: forall m
@@ -302,8 +358,9 @@ viewTitleSearchBox filter =
     [ class_ "title-search" ]
     [ HH.input
       [ class_ "title-search-box"
-      , HP.value filter
       , HP.placeholder "Search titles"
+      , HP.type_ InputType.InputText
+      , HP.value filter
       ]
     ]
 
@@ -320,8 +377,9 @@ viewAuthorSearchBox filter =
     [ class_ "author-search" ]
     [ HH.input
       [ class_ "author-search-box"
-      , HP.value filter
       , HP.placeholder "Search authors"
+      , HP.type_ InputType.InputText
+      , HP.value filter
       ]
     ]
 
@@ -399,73 +457,43 @@ viewPapers
   => LogMessages m
   => RequestArchive m
   => { selectedPapers :: Array Paper
-     , renderAmount :: RenderAmount
-     , visibleIds :: Set Id
      , filters
          :: { title :: String
             , author :: String
-            , yearMin :: Year
-            , yearMax :: Year
+            , minYear :: Year
+            , maxYear :: Year
+            , renderAmount :: RenderAmount
             | r1
             }
      | r0
      }
   -> H.ParentHTML Query ChildQuery ChildSlot m
-viewPapers record =
+viewPapers { selectedPapers, filters } =
   HH.ul
     [ class_ "paper-list" ]
-    (map (viewPaper record) (select record.selectedPapers))
-  where
-    select :: Array Paper -> Array Paper
-    select = case record.renderAmount of
-      RenderAll  -> identity
-      RenderSome -> Array.take 25
-
-isSelected
-  :: forall r
-   . { includeUnknown :: Boolean, yearMin :: Year, yearMax :: Year | r }
-  -> Paper
-  -> Boolean
-isSelected { includeUnknown, yearMin, yearMax } paper =
-  maybe
-    includeUnknown
-    (\year -> year >= yearMin && year <= yearMax)
-    paper.yearMaybe
-
-filter
-  :: forall r
-   . { includeUnknown :: Boolean, yearMin :: Year, yearMax :: Year | r }
-  -> Array Paper
-  -> Array Paper
-filter record = Array.filter $ isSelected record
+    (map (viewPaper filters) selectedPapers)
 
 viewPaper
-  :: forall m r0 r1
+  :: forall m r
    . MonadAff m
   => Now m
   => LogMessages m
   => RequestArchive m
-  => { visibleIds :: Set Id
-     , filters :: { title :: String, author :: String | r1 }
-     | r0
-     }
+  => { title :: String, author :: String | r }
   -> Paper
   -> H.ParentHTML Query ChildQuery ChildSlot m
-viewPaper { filters, visibleIds } paper =
-  if Set.member paper.titleId visibleIds
-  then HH.text ""
-  else
-    HH.li
-      [ class_ "paper" ]
-      [ viewTitle paper.title (Array.head paper.links) (Just filters.title)
-      , HH.p
-        [ class_ "details" ]
-        [ viewAuthors paper.authors (Just filters.author)
-        , viewYearMaybe paper.yearMaybe
-        , viewCitations paper.citations
-        ]
-      , viewEditLink paper.loc
+viewPaper { author, title } paper =
+  HH.li
+    [ class_ "paper" ]
+    [ viewTitle paper.title (Array.head paper.links) (Just title)
+    , HH.p
+      [ class_ "details" ]
+      [ viewAuthors paper.authors (Just author)
+      , viewYearMaybe paper.yearMaybe
+      , viewCitations paper.citations
       ]
+    , viewEditLink paper.loc
+    ]
 
 viewTitle
   :: forall m
