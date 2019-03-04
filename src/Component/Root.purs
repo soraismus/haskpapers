@@ -28,7 +28,7 @@ import Halogen.HTML as HH
 import Halogen.HTML.Core (toPropValue)
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
-import Halogen.Query.EventSource (eventSource')
+import Halogen.Query.EventSource (eventSource', eventSource_')
 import HaskPapers.Capability.LogMessages (class LogMessages, logDebug)
 import HaskPapers.Capability.Now (class Now)
 import HaskPapers.Capability.RequestArchive
@@ -93,7 +93,7 @@ instance showState :: Show State where
 data Query a
   = RequestArchive a
   | DisplayArchive Archive Date a
-  | RenderMore a
+  | RenderMore (H.SubscribeStatus -> a)
   | TitleFilter String a
   | AuthorFilter String a
   | AuthorFacetAdd a
@@ -144,10 +144,11 @@ component =
       Just response -> evalResponse response next
       Nothing       -> H.put LoadError *> pure next
   eval (DisplayArchive archive date next) = pure next
-  eval (RenderMore next) = do
+  eval (RenderMore reply) = do
+    logDebug "RenderMore"
     H.modify_ $ updateForFilters \stateRec ->
       stateRec.filters { renderAmount = RenderAll }
-    pure next
+    pure $ reply H.Done
   eval (TitleFilter string next) = pure next
   eval (AuthorFilter string next) = pure next
   eval (AuthorFacetAdd next) = pure next
@@ -192,7 +193,12 @@ component =
     H.subscribe $ eventSource'
       (onSliderUpdate slider)
       (Just <<< H.request <<< UpdateAccToSlider)
+    H.subscribe $ eventSource_'
+      (afterDuration 3000)
+      (H.request RenderMore)
     pure next
+
+foreign import afterDuration :: Int -> Effect Unit -> Effect (Effect Unit)
 
 convert :: Int -> { archive :: Archive, date :: WrappedDate } -> StateRec
 convert index { archive, date: WrappedDate _date } =
@@ -286,11 +292,6 @@ view stateRec@{ dailyIndex, papers, selectedPapers } =
   HH.div
     [ class_ "container" ]
     [ viewHeader $ Array.length selectedPapers
-    , HH.button
-      [ class_ "btn btn-outline-danger"
-      , HE.onClick (HE.input_ RenderMore)
-      ]
-      [ HH.text "Render more" ]
     , viewPaperOfTheDay dailyIndex papers
     , viewFilters stateRec
     , viewPapers stateRec
