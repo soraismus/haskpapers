@@ -150,32 +150,9 @@ component =
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void m
   eval (RequestArchive next) = do
     H.put Loading
-    maybeResponse <- requestArchive
-    randomIndex <- H.liftEffect $ randomInt 0 5
-    H.put $ maybe LoadError (Loaded <<< convert randomIndex) maybeResponse
-    dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
-    logDebug $ "initial state has dailyIndex: " <> show dailyIndex
-    state <- H.get
-    for_ (getStateRecMaybe state) \stateRec -> do
-      let min = toInt stateRec.yearMin
-      let max = (toInt stateRec.yearMax) + 1
-      let id = "year-slider"
-      let slider = { id
-                   , start: [min, max]
-                   , margin: Just 1
-                   , limit: Nothing
-                   , connect: Just true
-                   , direction: Nothing
-                   , orientation: Nothing
-                   , behavior: Nothing
-                   , step: Just 1
-                   , range: Just { min, max }
-                   }
-      logDebug ("RequestArchive -- " <> show slider)
-      H.subscribe $ eventSource'
-        (onSliderUpdate slider)
-        (Just <<< H.request <<< UpdateAccToSlider)
-    pure next
+    requestArchive >>= case _ of
+      Just response -> evalResponse response next
+      Nothing       -> H.put LoadError *> pure next
   eval (DisplayArchive archive date next) = pure next
   eval (RenderMore next) = do
     H.modify_ (\state -> case state of
@@ -192,10 +169,40 @@ component =
     logDebug ("UpdateAccToSlider -- " <> show sliderYears)
     dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
     logDebug $ show dailyIndex
-    H.modify_ (\state -> case state of
-      Loaded stateRec -> Loaded (stateRec { dailyIndex = 0 })
-      otherwise -> state)
     pure $ reply H.Listening
+
+  evalResponse
+    :: forall a
+    . { archive :: Archive, date :: WrappedDate }
+    -> a
+    -> H.ParentDSL State Query ChildQuery ChildSlot Void m a
+  evalResponse response next = do
+    randomIndex <- H.liftEffect $ randomInt 0 (Array.length response.archive.papers)
+    let stateRec = convert randomIndex response
+    let state = Loaded stateRec
+    H.put state
+    dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
+    logDebug $ "initial state has dailyIndex: " <> show dailyIndex
+    state <- H.get
+    let min = toInt stateRec.yearMin
+    let max = (toInt stateRec.yearMax) + 1
+    let id = "year-slider"
+    let slider = { id
+                , start: [min, max]
+                , margin: Just 1
+                , limit: Nothing
+                , connect: Just true
+                , direction: Nothing
+                , orientation: Nothing
+                , behavior: Nothing
+                , step: Just 1
+                , range: Just { min, max }
+                }
+    logDebug ("RequestArchive -- " <> show slider)
+    H.subscribe $ eventSource'
+      (onSliderUpdate slider)
+      (Just <<< H.request <<< UpdateAccToSlider)
+    pure next
 
 convert :: Int -> { archive :: Archive, date :: WrappedDate } -> StateRec
 convert index { archive, date: WrappedDate _date } =
