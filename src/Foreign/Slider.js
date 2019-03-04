@@ -1,19 +1,19 @@
 "use strict";
 var Data_Maybe = require('../Data.Maybe/index.js');
-var noUiSlider = require('nouislider');
-var wNumb      = require('wnumb');
+var slider = require('nouislider');
+var wNumb = require('wnumb');
 
 var _exports = (function () {
   var created = false;
-  var slider = null;
+  var sliderElement = null;
 
-  function createNoUiSliderEffect(spec) {
+  function createSlider(spec) {
     return function () {
       if (!created) {
         created = true;
 
         requestAnimationFrame(function () {
-          slider = document.getElementById(spec.id);
+          sliderElement = document.getElementById(spec.id);
 
           var fromMaybe = function (maybe) {
             return (maybe instanceof Data_Maybe.Nothing)
@@ -23,8 +23,8 @@ var _exports = (function () {
 
           var decimalFormat = wNumb({ decimals: 0 });
 
-          noUiSlider.create(
-            slider,
+          slider.create(
+            sliderElement,
             {
               start       : spec.start,
               margin      : fromMaybe(spec.margin),
@@ -51,31 +51,35 @@ var _exports = (function () {
     };
   }
 
-  function updateNoUiSliderEffect(ints) {
+  function onSliderUpdate(consumeInts) {
     return function () {
-      if (slider != null) {
+      if (sliderElement === null) {
+        return function () {};
+      } else {
         var updateEvent = 'update';
 
-        slider.noUiSlider.off(updateEvent);
+        sliderElement.slider.off(updateEvent);
 
-        slider.noUiSlider.on(
+        sliderElement.slider.on(
           updateEvent,
           function (values, handle, unencoded, tap, positions) {
-            values.map(function (x) {
+            consumeInts(values.map(function (x) {
               return parseInt(x, 10);
-            });
+            }))();
           });
-      }
 
-      return {};
+        return function () {
+          sliderElement.slider.off(updateEvent);
+        };
+      }
     };
   }
 
   return {
-    createNoUiSliderEffect: createNoUiSliderEffect,
-    updateNoUiSliderEffect: updateNoUiSliderEffect
+    createSlider: createSlider,
+    onSliderUpdate: onSliderUpdate
   };
 })();
 
-exports.createNoUiSliderEffect = _exports.createNoUiSliderEffect;
-exports.updateNoUiSliderEffect = _exports.updateNoUiSliderEffect;
+exports.createSlider = _exports.createSlider;
+exports.onSliderUpdate = _exports.onSliderUpdate;

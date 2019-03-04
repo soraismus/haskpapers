@@ -19,15 +19,15 @@ import HaskPapers.Api.Endpoint (Endpoint(..))
 import HaskPapers.Api.Request (BaseURL, RequestMethod(..))
 import HaskPapers.Api.Utils (decode, mkRequest)
 import HaskPapers.Capability.LogMessages (class LogMessages)
-import HaskPapers.Capability.ManageNoUiSlider (class ManageNoUiSlider)
+import HaskPapers.Capability.ManageSlider (class ManageSlider)
 import HaskPapers.Capability.Now (class Now)
 import HaskPapers.Capability.RequestArchive (class RequestArchive)
 import HaskPapers.Data.Archive (decodeArchive)
 import HaskPapers.Data.Log as Log
 import HaskPapers.Data.WrappedDate (WrappedDate(..))
-import HaskPapers.Foreign.NoUiSlider
-  ( createNoUiSliderEffect
-  , updateNoUiSliderEffect
+import HaskPapers.Foreign.Slider
+  ( createSlider
+  --, onSliderUpdate
   )
 import Type.Equality (class TypeEquals, from)
 
@@ -61,9 +61,9 @@ instance logMessagesAppM :: LogMessages AppM where
       Prod, Log.Debug -> pure unit
       _, _ -> Console.log $ Log.message log
 
-instance manageNoUiSliderAppM :: ManageNoUiSlider AppM where
-  createNoUiSlider = liftEffect <<< createNoUiSliderEffect
-  updateNoUiSlider = liftEffect <<< updateNoUiSliderEffect
+instance manageSliderAppM :: ManageSlider AppM where
+  createSlider = liftEffect <<< createSlider
+  -- onSliderUpdate = liftEffect <<< onSliderUpdate
 
 instance monadAskAppM :: TypeEquals e Env => MonadAsk e AppM where
   ask = AppM $ asks from

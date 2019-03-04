@@ -25,9 +25,11 @@ import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
-import HaskPapers.Capability.ManageNoUiSlider
-  ( class ManageNoUiSlider
-  , createNoUiSlider
+import Halogen.Query.EventSource (eventSource')
+import HaskPapers.Capability.ManageSlider
+  ( class ManageSlider
+  , createSlider
+  --, onSliderUpdate
   )
 import HaskPapers.Capability.LogMessages (class LogMessages)
 import HaskPapers.Capability.Now (class Now)
@@ -47,7 +49,7 @@ import HaskPapers.Data.Title (Title)
 import HaskPapers.Data.ToHtmlString (toHtmlString)
 import HaskPapers.Data.Year (Year, toInt)
 import HaskPapers.Data.WrappedDate (WrappedDate(..))
-import HaskPapers.Foreign.NoUiSlider (CreateNoUiSlider)
+import HaskPapers.Foreign.Slider (SliderUpdate, onSliderUpdate)
 
 data RenderAmount = RenderAll | RenderSome
 
@@ -102,6 +104,7 @@ data Query a
   | AuthorFacetAdd_ Author a
   | AuthorFacetRemove String a
   | YearFilter Year Year a
+  | UpdateSlider SliderUpdate (H.SubscribeStatus -> a)
 
 type ChildQuery = Coproduct3 CA.Query CB.Query CC.Query
 
@@ -110,7 +113,7 @@ type ChildSlot = Either3 Unit Unit Unit
 component
   :: forall m
    . MonadAff m
-  => ManageNoUiSlider m
+  => ManageSlider m
   => Now m
   => LogMessages m
   => RequestArchive m
@@ -167,20 +170,23 @@ component =
     H.put $ maybe LoadError (Loaded <<< convert randomIndex) maybeResponse
     state <- H.get
     for_ (getStateRecMaybe state) \stateRec -> do
-       let min = toInt stateRec.yearMin
-       let max = (toInt stateRec.yearMax) + 1
-       createNoUiSlider
-         { id: "year-slider"
-         , start: [min, max]
-         , margin: Just 1
-         , limit: Nothing
-         , connect: Just true
-         , direction: Nothing
-         , orientation: Nothing
-         , behavior: Nothing
-         , step: Just 1
-         , range: Just { min, max }
-         }
+      let min = toInt stateRec.yearMin
+      let max = (toInt stateRec.yearMax) + 1
+      createSlider
+        { id: "year-slider"
+        , start: [min, max]
+        , margin: Just 1
+        , limit: Nothing
+        , connect: Just true
+        , direction: Nothing
+        , orientation: Nothing
+        , behavior: Nothing
+        , step: Just 1
+        , range: Just { min, max }
+        }
+      H.subscribe $ eventSource'
+        onSliderUpdate
+        (Just <<< H.request <<< UpdateSlider)
     pure next
   eval (DisplayArchive archive date next) = pure next
   eval (RenderMore next) = do
@@ -194,6 +200,7 @@ component =
   eval (AuthorFacetAdd_ string next) = pure next
   eval (AuthorFacetRemove string next) = pure next
   eval (YearFilter yearMin yearMax next) = pure next
+  eval (UpdateSlider sliderUpdate reply) = pure (reply H.Listening)
 --  eval (ReadStates next) = do
 --    a <- H.query' CP.cp1 unit (H.request CA.GetState)
 --    b <- H.query' CP.cp2 unit (H.request CB.GetCount)

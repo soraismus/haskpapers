@@ -1,14 +1,16 @@
-module HaskPapers.Foreign.NoUiSlider 
-  ( CreateNoUiSlider
-  , UpdateNoUiSlider
-  , createNoUiSliderEffect
-  , updateNoUiSliderEffect
+module HaskPapers.Foreign.Slider 
+  ( Slider
+  , SliderUpdate
+  , createSlider
+  , onSliderUpdate
   ) where
+
+import Prelude
 
 import Data.Maybe (Maybe)
 import Effect (Effect)
 
-type CreateNoUiSlider =
+type Slider =
   { id          :: String        -- The element id to create a slider in.
   , start       :: Array Int     -- The starting handles' starting positions.
   , margin      :: Maybe Int     -- How far apart *must* handles be?
@@ -21,14 +23,10 @@ type CreateNoUiSlider =
   , range       :: Maybe { min :: Int, max :: Int }
   }
 
-foreign import createNoUiSliderEffect
-  :: forall a
-   . CreateNoUiSlider
-  -> Effect a
+foreign import createSlider :: Slider -> Effect Unit
 
-type UpdateNoUiSlider = Array Int
+type SliderUpdate = Array Int
 
-foreign import updateNoUiSliderEffect
-  :: forall a
-   . UpdateNoUiSlider
-  -> Effect a
+foreign import onSliderUpdate
+  :: (SliderUpdate -> Effect Unit)
+  -> Effect (Effect Unit)
