@@ -7,17 +7,21 @@ import Prelude
 
 import Data.Array as Array
 import Data.Array ((!!))
-import Data.Date (Date)
+import Data.Date (Date, canonicalDate, diff)
+import Data.Date.Component (Month(..))
 import Data.Either.Nested (Either3)
+import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (foldl, for_)
 import Data.Functor.Coproduct.Nested (Coproduct3)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.Int (fromNumber)
 import Data.Map (Map)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.String as String
+import Data.Time.Duration (Days(..))
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff)
@@ -30,7 +34,7 @@ import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Query.EventSource (eventSource')
 import HaskPapers.Capability.LogMessages (class LogMessages, logDebug)
-import HaskPapers.Capability.Now (class Now)
+import HaskPapers.Capability.Now (class Now, nowDate)
 import HaskPapers.Capability.RequestArchive
   ( class RequestArchive
   , requestArchive
@@ -175,7 +179,6 @@ component =
                                 })
       otherwise -> state)
     dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
-    logDebug $ show dailyIndex
     pure $ reply H.Listening
 
   evalResponse
@@ -184,27 +187,24 @@ component =
     -> a
     -> H.ParentDSL State Query ChildQuery ChildSlot Void m a
   evalResponse response next = do
-    randomIndex <- H.liftEffect $ randomInt 0 (Array.length response.archive.papers)
-    let stateRec = convert randomIndex response
-    let state = Loaded stateRec
-    H.put state
-    dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
-    logDebug $ "initial state has dailyIndex: " <> show dailyIndex
-    state <- H.get
+    let paperNbr = Array.length response.archive.papers
+    dailyIndex <- nowDate >>= (pure <<< fromMaybe 0 <<< getIndexMaybe paperNbr)
+    let stateRec = convert dailyIndex response
+    H.put $ Loaded stateRec
     let min = toInt stateRec.yearMin
     let max = (toInt stateRec.yearMax) + 1
     let id = "year-slider"
     let slider = { id
-                , start: [min, max]
-                , margin: Just 1
-                , limit: Nothing
-                , connect: Just true
-                , direction: Nothing
-                , orientation: Nothing
-                , behavior: Nothing
-                , step: Just 1
-                , range: Just { min, max }
-                }
+                 , start: [min, max]
+                 , margin: Just 1
+                 , limit: Nothing
+                 , connect: Just true
+                 , direction: Nothing
+                 , orientation: Nothing
+                 , behavior: Nothing
+                 , step: Just 1
+                 , range: Just { min, max }
+                 }
     logDebug ("RequestArchive -- " <> show slider)
     H.subscribe $ eventSource'
       (onSliderUpdate slider)
@@ -445,7 +445,7 @@ viewPapers record =
 
 isSelected :: Year -> Year -> Paper -> Boolean
 isSelected minYear maxYear paper =
-  maybe true (\year -> year >= minYear && year <= maxYear) paper.yearMaybe
+  maybe false (\year -> year >= minYear && year <= maxYear) paper.yearMaybe
 
 filter :: Year -> Year -> Array Paper -> Array Paper
 filter minYear maxYear = Array.filter $ isSelected minYear maxYear
@@ -581,3 +581,20 @@ viewCitations
   -> H.ParentHTML Query ChildQuery ChildSlot m
 viewCitations citations =
   HH.text $ " (cited by " <> show (Array.length citations) <> ")"
+
+getDateDiffMaybe :: Date -> Maybe Days
+getDateDiffMaybe date = do
+  baseDate <- maybeBaseDate
+  pure $ diff date baseDate
+
+getIndexMaybe :: Int -> Date -> Maybe Int
+getIndexMaybe max date = do
+  Days number <- getDateDiffMaybe date
+  int <- fromNumber number
+  pure $ int `mod` max
+
+maybeBaseDate :: Maybe Date
+maybeBaseDate = do
+  year <- toEnum 2019
+  day <- toEnum 1
+  pure $ canonicalDate year January day
