@@ -72,6 +72,7 @@ type StateRec =
       , titleIds :: Set Id
       , author :: String
       , authorIds :: Set Id
+      , includeUnknown :: Boolean
       , yearMin :: Year
       , yearMax :: Year
       }
@@ -156,9 +157,7 @@ component =
       Nothing       -> H.put LoadError *> pure next
   eval (DisplayArchive archive date next) = pure next
   eval (RenderMore next) = do
-    H.modify_ (\state -> case state of
-      Loaded stateRec -> Loaded (stateRec { renderAmount = RenderAll })
-      otherwise -> state)
+    H.modify_ $ mapState (_ { renderAmount = RenderAll })
     pure next
   eval (TitleFilter string next) = pure next
   eval (AuthorFilter string next) = pure next
@@ -168,13 +167,10 @@ component =
   eval (YearFilter yearMin yearMax next) = pure next
   eval (UpdateAccToSlider sliderYears@(Tuple minYear maxYear) reply) = do
     logDebug ("UpdateAccToSlider -- " <> show sliderYears)
-    H.modify_ (\state -> case state of
-      Loaded stateRec -> Loaded (stateRec 
-                                { selectedPapers = filter minYear maxYear stateRec.papers
-                                , filters { yearMin = minYear , yearMax = maxYear }
-                                })
-      otherwise -> state)
-    dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
+    H.modify_ $ mapState \stateRec -> (stateRec
+      { selectedPapers = filter stateRec.filters stateRec.papers
+      , filters { yearMin = minYear, yearMax = maxYear }
+      })
     pure $ reply H.Listening
 
   evalResponse
@@ -224,15 +220,15 @@ convert index { archive, date: WrappedDate _date } =
     , titleIds: Set.empty
     , author: ""
     , authorIds: Set.empty
+    , includeUnknown: false
     , yearMin: archive.yearMin
     , yearMax: archive.yearMax
     }
   }
 
-getStateRecMaybe :: State -> Maybe StateRec
-getStateRecMaybe = case _ of
-  Loaded stateRec -> Just stateRec
-  _               -> Nothing
+mapState :: (StateRec -> StateRec) -> State -> State
+mapState f (Loaded stateRec) = Loaded $ f stateRec
+mapState f state             = state
 
 view
   :: forall m
@@ -439,12 +435,23 @@ viewPapers record =
       RenderAll  -> identity
       RenderSome -> Array.take 25
 
-isSelected :: Year -> Year -> Paper -> Boolean
-isSelected minYear maxYear paper =
-  maybe false (\year -> year >= minYear && year <= maxYear) paper.yearMaybe
+isSelected
+  :: forall r
+   . { includeUnknown :: Boolean, yearMin :: Year, yearMax :: Year | r }
+  -> Paper
+  -> Boolean
+isSelected { includeUnknown, yearMin, yearMax } paper =
+  maybe
+    includeUnknown
+    (\year -> year >= yearMin && year <= yearMax)
+    paper.yearMaybe
 
-filter :: Year -> Year -> Array Paper -> Array Paper
-filter minYear maxYear = Array.filter $ isSelected minYear maxYear
+filter
+  :: forall r
+   . { includeUnknown :: Boolean, yearMin :: Year, yearMax :: Year | r }
+  -> Array Paper
+  -> Array Paper
+filter record = Array.filter $ isSelected record
 
 viewPaper
   :: forall m r0 r1
