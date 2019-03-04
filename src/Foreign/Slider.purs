@@ -7,7 +7,9 @@ module HaskPapers.Foreign.Slider
 import Prelude
 
 import Data.Maybe (Maybe)
+import Data.Tuple (Tuple)
 import Effect (Effect)
+import HaskPapers.Data.Year (Year)
 
 type Slider =
   { id          :: String        -- The element id to create a slider in.

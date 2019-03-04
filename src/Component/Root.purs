@@ -11,11 +11,14 @@ import Data.Date (Date)
 import Data.Either.Nested (Either3)
 import Data.Foldable (foldl, for_)
 import Data.Functor.Coproduct.Nested (Coproduct3)
+import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
 import Data.Map (Map)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.String as String
+import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff)
 import Effect.Random (randomInt)
@@ -47,6 +50,11 @@ import HaskPapers.Data.WrappedDate (WrappedDate(..))
 import HaskPapers.Foreign.Slider (SliderYears, onSliderUpdate)
 
 data RenderAmount = RenderAll | RenderSome
+
+derive instance genericRenderAmount :: Generic RenderAmount _
+
+instance showRenderAmount :: Show RenderAmount where
+  show = genericShow
 
 type StateRec =
   { now :: Date
@@ -87,6 +95,11 @@ data State
   | Loading
   | Loaded StateRec
   | LoadError
+
+derive instance genericState :: Generic State _
+
+instance showState :: Show State where
+  show = genericShow
 
 data Query a
   = RequestArchive a
@@ -140,6 +153,8 @@ component =
     maybeResponse <- requestArchive
     randomIndex <- H.liftEffect $ randomInt 0 5
     H.put $ maybe LoadError (Loaded <<< convert randomIndex) maybeResponse
+    dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
+    logDebug $ "initial state has dailyIndex: " <> show dailyIndex
     state <- H.get
     for_ (getStateRecMaybe state) \stateRec -> do
       let min = toInt stateRec.yearMin
@@ -173,12 +188,17 @@ component =
   eval (AuthorFacetAdd_ string next) = pure next
   eval (AuthorFacetRemove string next) = pure next
   eval (YearFilter yearMin yearMax next) = pure next
-  eval (UpdateAccToSlider sliderYears reply) = do
-    logDebug ("UpdateAccToSlider -- " <> show sliderYears)
-    H.modify_ (\state -> case state of
-      Loaded stateRec -> Loaded (stateRec { dailyIndex = 0 })
-      otherwise -> state)
-    pure (reply H.Listening)
+  eval (UpdateAccToSlider sliderYears reply) =
+    case sliderYears of
+      [min, max] -> do
+        logDebug ("UpdateAccToSlider -- " <> show sliderYears)
+        dailyIndex <- H.gets (map _.dailyIndex <<< getStateRecMaybe)
+        logDebug $ show dailyIndex
+        H.modify_ (\state -> case state of
+          Loaded stateRec -> Loaded (stateRec { dailyIndex = 0 })
+          otherwise -> state)
+        pure $ reply (if max == 2005 then H.Done else H.Listening)
+      _ -> pure $ reply H.Done
 
 convert :: Int -> { archive :: Archive, date :: WrappedDate } -> StateRec
 convert index { archive, date: WrappedDate _date } =
