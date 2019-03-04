@@ -26,12 +26,7 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Query.EventSource (eventSource')
-import HaskPapers.Capability.ManageSlider
-  ( class ManageSlider
-  , createSlider
-  --, onSliderUpdate
-  )
-import HaskPapers.Capability.LogMessages (class LogMessages)
+import HaskPapers.Capability.LogMessages (class LogMessages, logDebug)
 import HaskPapers.Capability.Now (class Now)
 import HaskPapers.Capability.RequestArchive
   ( class RequestArchive
@@ -49,7 +44,7 @@ import HaskPapers.Data.Title (Title)
 import HaskPapers.Data.ToHtmlString (toHtmlString)
 import HaskPapers.Data.Year (Year, toInt)
 import HaskPapers.Data.WrappedDate (WrappedDate(..))
-import HaskPapers.Foreign.Slider (SliderUpdate, onSliderUpdate)
+import HaskPapers.Foreign.Slider (SliderYears, onSliderUpdate)
 
 data RenderAmount = RenderAll | RenderSome
 
@@ -87,7 +82,6 @@ data HttpError
   | BadStatus (HttpResponse String)
   | BadPayload String (HttpResponse String)
 
---type State = RemoteData HttpError StateRec
 data State
   = NotAsked
   | Loading
@@ -104,7 +98,7 @@ data Query a
   | AuthorFacetAdd_ Author a
   | AuthorFacetRemove String a
   | YearFilter Year Year a
-  | UpdateSlider SliderUpdate (H.SubscribeStatus -> a)
+  | UpdateAccToSlider SliderYears (H.SubscribeStatus -> a)
 
 type ChildQuery = Coproduct3 CA.Query CB.Query CC.Query
 
@@ -113,7 +107,6 @@ type ChildSlot = Either3 Unit Unit Unit
 component
   :: forall m
    . MonadAff m
-  => ManageSlider m
   => Now m
   => LogMessages m
   => RequestArchive m
@@ -141,27 +134,6 @@ component =
   render (Loaded stateRec) = view stateRec
   render LoadError = HH.text "LoadError"
 
-  convert :: Int -> { archive :: Archive, date :: WrappedDate } -> StateRec
-  convert index { archive, date: WrappedDate _date } =
-    { now: _date
-    , authors: archive.authors
-    , dailyIndex: index
-    , papers: archive.papers
-    , yearMin: archive.yearMin
-    , yearMax: archive.yearMax
-    , authorFacets: []
-    , renderAmount: RenderSome
-    , visibleIds: Set.empty
-    , filters:
-      { title: ""
-      , titleIds: Set.empty
-      , author: ""
-      , authorIds: Set.empty
-      , yearMin: toInt archive.yearMin
-      , yearMax: toInt archive.yearMax
-      }
-    }
-
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void m
   eval (RequestArchive next) = do
     H.put Loading
@@ -172,21 +144,22 @@ component =
     for_ (getStateRecMaybe state) \stateRec -> do
       let min = toInt stateRec.yearMin
       let max = (toInt stateRec.yearMax) + 1
-      createSlider
-        { id: "year-slider"
-        , start: [min, max]
-        , margin: Just 1
-        , limit: Nothing
-        , connect: Just true
-        , direction: Nothing
-        , orientation: Nothing
-        , behavior: Nothing
-        , step: Just 1
-        , range: Just { min, max }
-        }
+      let id = "year-slider"
+      let slider = { id
+                   , start: [min, max]
+                   , margin: Just 1
+                   , limit: Nothing
+                   , connect: Just true
+                   , direction: Nothing
+                   , orientation: Nothing
+                   , behavior: Nothing
+                   , step: Just 1
+                   , range: Just { min, max }
+                   }
+      logDebug ("RequestArchive -- " <> show slider)
       H.subscribe $ eventSource'
-        onSliderUpdate
-        (Just <<< H.request <<< UpdateSlider)
+        (onSliderUpdate slider)
+        (Just <<< H.request <<< UpdateAccToSlider)
     pure next
   eval (DisplayArchive archive date next) = pure next
   eval (RenderMore next) = do
@@ -200,19 +173,33 @@ component =
   eval (AuthorFacetAdd_ string next) = pure next
   eval (AuthorFacetRemove string next) = pure next
   eval (YearFilter yearMin yearMax next) = pure next
-  eval (UpdateSlider sliderUpdate reply) = pure (reply H.Listening)
---  eval (ReadStates next) = do
---    a <- H.query' CP.cp1 unit (H.request CA.GetState)
---    b <- H.query' CP.cp2 unit (H.request CB.GetCount)
---    c <- H.query' CP.cp3 unit (H.request CC.GetValue)
---    H.put Loading
---    pure next
---  eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void m
---  eval (Navigate destination a) = do
---    { route } <- H.get 
---    when (route /= destination) do
---      H.modify_ _ { route = destination }
---    pure a
+  eval (UpdateAccToSlider sliderYears reply) = do
+    logDebug ("UpdateAccToSlider -- " <> show sliderYears)
+    H.modify_ (\state -> case state of
+      Loaded stateRec -> Loaded (stateRec { dailyIndex = 0 })
+      otherwise -> state)
+    pure (reply H.Listening)
+
+convert :: Int -> { archive :: Archive, date :: WrappedDate } -> StateRec
+convert index { archive, date: WrappedDate _date } =
+  { now: _date
+  , authors: archive.authors
+  , dailyIndex: index
+  , papers: archive.papers
+  , yearMin: archive.yearMin
+  , yearMax: archive.yearMax
+  , authorFacets: []
+  , renderAmount: RenderSome
+  , visibleIds: Set.empty
+  , filters:
+    { title: ""
+    , titleIds: Set.empty
+    , author: ""
+    , authorIds: Set.empty
+    , yearMin: toInt archive.yearMin
+    , yearMax: toInt archive.yearMax
+    }
+  }
 
 getStateRecMaybe :: State -> Maybe StateRec
 getStateRecMaybe = case _ of
@@ -230,7 +217,7 @@ view
 view stateRec@{ dailyIndex, papers, visibleIds } =
   HH.div
     [ class_ "container" ]
-    [ viewHeader visibleCount
+    [ viewHeader visibleCount'
     , HH.button
       [ class_ "btn btn-outline-danger"
       , HE.onClick (HE.input_ RenderMore)
@@ -241,6 +228,7 @@ view stateRec@{ dailyIndex, papers, visibleIds } =
     , viewPapers stateRec
     ]
   where
+    visibleCount' = Array.length papers
     visibleCount = foldl
       (\count paper ->
         if Set.member paper.titleId visibleIds
@@ -259,7 +247,12 @@ viewHeader
   -> H.ParentHTML Query ChildQuery ChildSlot m
 viewHeader n =
   HH.header_
-    [ HH.h1_ [ HH.text $ " Haskell Paper" <> if n == 1 then "" else "s" ]
+    [ HH.h1_
+      [ HH.text
+          $  show n
+          <> " Haskell Paper"
+          <> if n == 1 then "" else "s"
+      ]
     , HH.a
       [ class_ "sutble-link"
       , HP.href "https://github.com/mitchellwrosen/haskell-papers"
@@ -544,60 +537,3 @@ viewCitations
   -> H.ParentHTML Query ChildQuery ChildSlot m
 viewCitations citations =
   HH.text $ " (cited by " <> show (Array.length citations) <> ")"
-
---  render (Loaded stateRec) = HH.div_
---    [ HH.div
---        [ HP.class_ (H.ClassName "box")]
---        [ HH.h1_ [ HH.text "Component A" ]
---        , HH.slot' CP.cp1 unit CA.component unit absurd
---        ]
---    , HH.div
---        [ HP.class_ (H.ClassName "box")]
---        [ HH.h1_ [ HH.text "Component B" ]
---        , HH.slot' CP.cp2 unit CB.component unit absurd
---        ]
---    , HH.div
---        [ HP.class_ (H.ClassName "box")]
---        [ HH.h1_ [ HH.text "Component C" ]
---        , HH.slot' CP.cp3 unit CC.component unit absurd
---        ]
---    , HH.p_
---        [ HH.text "Last observed states:"]
---    , HH.ul_
---        [ HH.li_ [ HH.text ("Component A: " <> show (Nothing :: Maybe Boolean)) ]
---        , HH.li_ [ HH.text ("Component B: " <> show (Nothing :: Maybe Int)) ]
---        , HH.li_ [ HH.text ("Component C: " <> show (Nothing :: Maybe String)) ]
---        ]
---    , HH.button
---        [ HE.onClick (HE.input_ RenderMore) ]
---        [ HH.text "Check states now" ]
---    ]
-
---  render (Loaded stateRec) = HH.div_
---    [ viewHeader 2
---    , HH.div
---        [ class_ "box"]
---        [ HH.h1_ [ HH.text "Component A" ]
---        , HH.slot' CP.cp1 unit CA.component unit absurd
---        ]
---    , HH.div
---        [ class_ "box"]
---        [ HH.h1_ [ HH.text "Component B" ]
---        , HH.slot' CP.cp2 unit CB.component unit absurd
---        ]
---    , HH.div
---        [ class_ "box"]
---        [ HH.h1_ [ HH.text "Component C" ]
---        , HH.slot' CP.cp3 unit CC.component unit absurd
---        ]
---    , HH.p_
---        [ HH.text "Last observed states:"]
---    , HH.ul_
---        [ HH.li_ [ HH.text ("Component A: " <> show (Nothing :: Maybe Boolean)) ]
---        , HH.li_ [ HH.text ("Component B: " <> show (Nothing :: Maybe Int)) ]
---        , HH.li_ [ HH.text ("Component C: " <> show (Nothing :: Maybe String)) ]
---        ]
---    , HH.button
---        [ HE.onClick (HE.input_ RenderMore) ]
---        [ HH.text "Check states now" ]
---    ]

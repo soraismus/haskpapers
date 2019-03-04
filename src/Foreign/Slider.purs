@@ -1,7 +1,6 @@
 module HaskPapers.Foreign.Slider 
   ( Slider
-  , SliderUpdate
-  , createSlider
+  , SliderYears
   , onSliderUpdate
   ) where
 
@@ -23,10 +22,9 @@ type Slider =
   , range       :: Maybe { min :: Int, max :: Int }
   }
 
-foreign import createSlider :: Slider -> Effect Unit
-
-type SliderUpdate = Array Int
+type SliderYears = Array Int
 
 foreign import onSliderUpdate
-  :: (SliderUpdate -> Effect Unit)
+  :: Slider
+  -> (SliderYears -> Effect Unit)
   -> Effect (Effect Unit)
