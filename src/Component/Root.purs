@@ -78,20 +78,6 @@ type StateRec =
       }
   }
 
-type HttpResponse body =
-  { url :: String
-  , status :: { code :: Int, message :: String }
-  , headers :: Map String String
-  , body :: body
-  }
-
-data HttpError
-  = BadUrl String
-  | Timeout
-  | NetworkError
-  | BadStatus (HttpResponse String)
-  | BadPayload String (HttpResponse String)
-
 data State
   = NotAsked
   | Loading
