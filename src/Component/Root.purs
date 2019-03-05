@@ -5,18 +5,31 @@ module HaskPapers.Component.Root
 
 import Prelude
 
-import Data.Array as Array
+import Web.UIEvent.KeyboardEvent (KeyboardEvent, key)
+import Web.UIEvent.KeyboardEvent.EventTypes as KET
+
 import Data.Array ((!!))
+import Data.Array as Array
 import Data.Date (Date)
+import Data.Either (Either(..), hush, either)
 import Data.Either.Nested (Either3)
+import Data.Filterable (filterMap)
+import Data.Foldable (all, any, foldM, foldr)
 import Data.Functor.Coproduct.Nested (Coproduct3)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.List (List(..), (:))
+import Data.List as List
 import Data.Map (Map)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.String as String
+import Data.String.CodeUnits as SCU
+import Data.String.Pattern (Pattern(..))
+import Data.String.Regex (Regex)
+import Data.String.Regex as Regex
+import Data.String.Regex.Flags (ignoreCase)
 import Data.Tuple (Tuple(..))
 import DOM.HTML.Indexed.InputType as InputType
 import Effect (Effect)
@@ -38,7 +51,8 @@ import HaskPapers.Capability.RequestArchive
 import HaskPapers.Component.ComponentA as CA
 import HaskPapers.Component.ComponentB as CB
 import HaskPapers.Component.ComponentC as CC
-import HaskPapers.Component.Utils (getDailyIndex)
+import HaskPapers.Component.Utils (afterDuration, getDailyIndex)
+import HaskPapers.Component.ViewUtils (class_, padLeft3)
 import HaskPapers.Data.Archive (Archive)
 import HaskPapers.Data.Author (Author)
 import HaskPapers.Data.Id (Id)
@@ -60,6 +74,7 @@ instance showRenderAmount :: Show RenderAmount where
 type StateRec =
   { now :: Date
   , papers :: Array Paper
+  , ids :: Set Id
   , dailyIndex :: Int
   , authors :: Map Id Author
   , overallMinYear :: Year
@@ -69,9 +84,9 @@ type StateRec =
   , selectedPapers :: Array Paper 
   , filters ::
       { title :: String
-      , titleIds :: Set Id
+      , idsForTitle :: Set Id
       , author :: String
-      , authorIds :: Set Id
+      , idsForAuthor :: Set Id
       , includeUnknown :: Boolean
       , minYear :: Year
       , maxYear :: Year
@@ -130,7 +145,7 @@ component =
   render NotAsked = HH.div_
     [ HH.text "NotAsked"
     , HH.button
-        [ HE.onClick (HE.input_ RequestArchive) ]
+        [ HE.onClick $ HE.input_ RequestArchive ]
         [ HH.text "Request archive." ]
     ]
   render Loading = HH.text "Loading"
@@ -143,20 +158,44 @@ component =
     requestArchive >>= case _ of
       Just response -> evalResponse response next
       Nothing       -> H.put LoadError *> pure next
-  eval (DisplayArchive archive date next) = pure next
+  eval (DisplayArchive archive date next) = do
+    logDebug $ "DisplayArchive: " <> show date <> "; " <> show archive
+    pure next
   eval (RenderMore reply) = do
     logDebug "RenderMore"
     H.modify_ $ updateForFilters \stateRec ->
       stateRec.filters { renderAmount = RenderAll }
     pure $ reply H.Done
-  eval (TitleFilter string next) = pure next
-  eval (AuthorFilter string next) = pure next
-  eval (AuthorFacetAdd next) = pure next
-  eval (AuthorFacetAdd_ string next) = pure next
-  eval (AuthorFacetRemove string next) = pure next
-  eval (YearFilter minYear maxYear next) = pure next
+  eval (TitleFilter string next) = do
+    logDebug $ "TitleFilter: " <> string
+    H.modify_ $ updateForFilters \stateRec ->
+      stateRec.filters
+        { title = string
+        , idsForTitle = getIdsForTitle stateRec.ids string stateRec.papers
+        }
+    pure next
+  eval (AuthorFilter string next) = do
+    logDebug $ "AuthorFilter: " <> string
+    H.modify_ $ updateForFilters \stateRec ->
+      stateRec.filters
+        { author = string
+        , idsForAuthor = getIdsForAuthor stateRec.ids string stateRec.papers
+        }
+    pure next
+  eval (AuthorFacetAdd next) = do
+    logDebug "AuthorFacetAdd"
+    pure next
+  eval (AuthorFacetAdd_ author next) = do
+    logDebug $ "AuthorFacetAdd_: " <> show author
+    pure next
+  eval (AuthorFacetRemove string next) = do
+    logDebug $ "AuthorFacetRemove: " <> string
+    pure next
+  eval (YearFilter minYear maxYear next) = do
+    logDebug $ "YearFilter: " <> show minYear <> ", " <> show maxYear
+    pure next
   eval (UpdateAccToSlider sliderYears@(Tuple minYear maxYear) reply) = do
-    logDebug ("UpdateAccToSlider -- " <> show sliderYears)
+    logDebug $ "UpdateAccToSlider -- " <> show sliderYears
     H.modify_ $ updateForFilters \stateRec ->
       stateRec.filters { minYear = minYear, maxYear = maxYear }
     pure $ reply H.Listening
@@ -198,34 +237,103 @@ component =
       (H.request RenderMore)
     pure next
 
-foreign import afterDuration :: Int -> Effect Unit -> Effect (Effect Unit)
+getIdsForTitle :: Set Id -> String -> Array Paper -> Set Id
+getIdsForTitle ids str papers
+  | String.null $ String.trim str = ids
+  | otherwise =
+      either (const Set.empty) identity do
+        regexes <- getRegexes str
+        let _reduce = reduce regexes
+        pure $ foldr _reduce Set.empty papers
+  where
+    _getRegexes :: Array String -> Either String (List Regex)
+    _getRegexes =
+      foldM
+        (\regexes str -> case Regex.regex str ignoreCase of
+            Left error -> Left $ "Error on '" <> str <> "': " <> error
+            Right regex -> Right $ (regex : regexes))
+        Nil
+
+    getRegexes :: String -> Either String (List Regex)
+    getRegexes = _getRegexes <<< words
+
+    reduce :: List Regex -> Paper -> Set Id -> Set Id
+    reduce regexes paper ids =
+      let str = toHtmlString paper.title
+      in if all (\regex -> Regex.test regex str) regexes
+           then Set.insert paper.titleId ids
+           else ids
+
+getIdsForAuthor :: Set Id -> String -> Array Paper -> Set Id
+getIdsForAuthor ids str papers
+  | String.null $ String.trim str = ids
+  | otherwise =
+      either (const Set.empty) identity do
+        regexes <- getRegexes str
+        let _reduce = reduce regexes
+        pure $ foldr _reduce Set.empty papers
+  where
+    _getRegexes :: Array String -> Either String (List Regex)
+    _getRegexes =
+      foldM
+        (\regexes str -> case Regex.regex str ignoreCase of
+            Left error -> Left $ "Error on '" <> str <> "': " <> error
+            Right regex -> Right $ (regex : regexes))
+        Nil
+
+    getRegexes :: String -> Either String (List Regex)
+    getRegexes = _getRegexes <<< words
+
+    match :: List Regex -> Array Author -> Boolean
+    match regexes authors =
+      all
+        (\regex ->
+          any
+            (\author -> Regex.test regex $ toHtmlString author)
+            authors)
+        regexes
+
+    reduce :: List Regex -> Paper -> Set Id -> Set Id
+    reduce regexes paper ids =
+      if match regexes paper.authors
+        then Set.insert paper.titleId ids
+        else ids
+
+getAllIds :: Array Paper -> Set Id
+getAllIds = foldr (Set.insert <<< _.titleId) Set.empty
 
 convert :: Int -> { archive :: Archive, date :: WrappedDate } -> StateRec
 convert index { archive, date: WrappedDate _date } =
-  { now: _date
-  , authors: archive.authors
-  , dailyIndex: index
-  , papers: archive.papers
-  , overallMinYear: archive.minYear
-  , overallMaxYear: archive.maxYear
-  , authorFacets: []
-  , visibleIds: Set.empty
-  , selectedPapers: archive.papers
-  , filters:
-    { title: ""
-    , titleIds: Set.empty
-    , author: ""
-    , authorIds: Set.empty
-    , includeUnknown: false
-    , minYear: archive.minYear
-    , maxYear: archive.maxYear
-    , renderAmount: RenderSome
+  let
+    ids = getAllIds archive.papers
+  in
+    { now: _date
+    , authors: archive.authors
+    , dailyIndex: index
+    , papers: archive.papers
+    , ids
+    , overallMinYear: archive.minYear
+    , overallMaxYear: archive.maxYear
+    , authorFacets: []
+    , visibleIds: Set.empty
+    , selectedPapers: archive.papers
+    , filters:
+      { title: ""
+      , idsForTitle: ids
+      , author: ""
+      , idsForAuthor: ids
+      , includeUnknown: true
+      , minYear: archive.minYear
+      , maxYear: archive.maxYear
+      , renderAmount: RenderSome
+      }
     }
-  }
 
 filter
   :: forall r
-   . { includeUnknown :: Boolean
+   . { idsForAuthor :: Set Id
+     , idsForTitle :: Set Id
+     , includeUnknown :: Boolean
      , minYear :: Year
      , maxYear :: Year
      , renderAmount :: RenderAmount
@@ -241,14 +349,24 @@ filter record@{ renderAmount } = case renderAmount of
 
 isSelected
   :: forall r
-   . { includeUnknown :: Boolean, minYear :: Year, maxYear :: Year | r }
+   . { idsForAuthor :: Set Id
+     , idsForTitle :: Set Id
+     , includeUnknown :: Boolean
+     , minYear :: Year
+     , maxYear :: Year
+     | r
+     }
   -> Paper
   -> Boolean
-isSelected { includeUnknown, minYear, maxYear } paper =
-  maybe
-    includeUnknown
-    (\year -> year >= minYear && year <= maxYear)
-    paper.yearMaybe
+isSelected filters@{ includeUnknown, minYear, maxYear } paper =
+  let
+    isYearSelected = maybe includeUnknown
+      (\year -> year >= minYear && year <= maxYear)
+      paper.yearMaybe
+  in
+    isYearSelected
+      && Set.member paper.titleId filters.idsForTitle
+      && Set.member paper.titleId filters.idsForAuthor
 
 mapState :: (StateRec -> StateRec) -> State -> State
 mapState f (Loaded stateRec) = Loaded $ f stateRec
@@ -257,9 +375,9 @@ mapState f state             = state
 updateForFilters
   :: (  StateRec
      -> { title :: String
-        , titleIds :: Set Id
+        , idsForTitle :: Set Id
         , author :: String
-        , authorIds :: Set Id
+        , idsForAuthor :: Set Id
         , includeUnknown :: Boolean
         , minYear :: Year
         , maxYear :: Year
@@ -352,6 +470,7 @@ viewIncludeUnknown = HH.div
   [ HH.input
     [ class_ "include-unknown-checkbox"
     , HP.type_ InputType.InputCheckbox
+    , HP.checked true
     , HE.onChecked (HE.input SetIncludeUnknown)
     ]
   , HH.text "Include papers with unknown year of publication "
@@ -373,6 +492,7 @@ viewTitleSearchBox filter =
       , HP.placeholder "Search titles"
       , HP.type_ InputType.InputText
       , HP.value filter
+      , HE.onValueInput $ HE.input TitleFilter
       ]
     ]
 
@@ -384,16 +504,20 @@ viewAuthorSearchBox
   => RequestArchive m
   => String
   -> H.ParentHTML Query ChildQuery ChildSlot m
-viewAuthorSearchBox filter =
+viewAuthorSearchBox authorName =
   HH.div
     [ class_ "author-search" ]
     [ HH.input
       [ class_ "author-search-box"
       , HP.placeholder "Search authors"
       , HP.type_ InputType.InputText
-      , HP.value filter
+      , HP.value authorName
+      , HE.onValueInput $ HE.input $ AuthorFilter
+      , HE.onKeyUp $ HE.input_ AuthorFacetAdd
       ]
     ]
+
+-- keyboardEvent.key == "Enter"
 
 viewAuthorFacet
   :: forall m
@@ -406,7 +530,7 @@ viewAuthorFacet
 viewAuthorFacet facet =
   HH.div
     [ class_ "facet"
-    --, HE.onClick
+    --, HE.onClick $ HE.input_ AuthorFacetRemove
     ]
     [ HH.text facet ]
 
@@ -520,15 +644,15 @@ viewTitle
 viewTitle title maybeLink maybeFilter =
   HH.p
     [ class_ "title" ]
-    [ linkNode ]
+    linkNodes
   where
-    titleNode = maybe
-      (HH.text $ toHtmlString title)
-      (\filter -> HH.text $ toHtmlString title)
+    titleNodes = maybe
+      [HH.text $ toHtmlString title]
+      (\filter -> applyLiveFilterStyle (words filter) $ toHtmlString title)
       maybeFilter
-    linkNode = maybe
-      titleNode
-      (\link -> HH.a [class_ "link", HP.href $ toHtmlString link] [titleNode])
+    linkNodes = maybe
+      titleNodes
+      (\link -> [HH.a [class_ "link", HP.href $ toHtmlString link] titleNodes])
       maybeLink
 
 viewEditLink
@@ -540,7 +664,11 @@ viewEditLink
   => { file :: Int, line :: Int | r }
   -> H.ParentHTML Query ChildQuery ChildSlot m
 viewEditLink { file, line } =
-  HH.a [class_ "subtle-link edit", HP.href editLink] [HH.text "(edit)"]
+  HH.a
+    [ class_ "subtle-link edit"
+    , HP.href editLink
+    ]
+    [ HH.text "(edit)" ]
   where
     editLink =
       "https://github.com"
@@ -549,16 +677,6 @@ viewEditLink { file, line } =
         <> (padLeft3 $ show file)
         <> ".yaml#L"
         <> show line
-
-padLeft3 :: String -> String
-padLeft3 str
-  | String.length str == 0 = "000"
-  | String.length str == 1 = "00" <> str
-  | String.length str == 2 = "0" <> str
-  | otherwise       = str
-
-class_ :: forall r i. String -> HH.IProp ( class :: String | r ) i
-class_ = HP.class_ <<< HH.ClassName
 
 viewAuthors
   :: forall m r
@@ -582,12 +700,17 @@ viewAuthor
   -> Author
   -> H.ParentHTML Query ChildQuery ChildSlot m
 viewAuthor maybeFilter author =
-  HH.span
-    [ class_ "author"
-    --, HE.onClick
-    ]
-    [ (maybe (HH.text "") (\filter -> HH.text filter) maybeFilter) ]
--- applyLiveFilterStyle
+  let
+    str = toHtmlString author
+  in
+    HH.span
+      [ class_ "author"
+      , HE.onClick $ HE.input_ $ AuthorFacetAdd_ author
+      ]
+      (maybe
+        [HH.text str]
+        (\filter -> applyLiveFilterStyle (words filter) str)
+        maybeFilter)
 
 viewYearMaybe
   :: forall m r
@@ -598,7 +721,10 @@ viewYearMaybe
   => Maybe Year
   -> H.ParentHTML Query ChildQuery ChildSlot m
 viewYearMaybe maybeYear =
-  maybe (HH.text "") (\year -> HH.text $ " [" <> toHtmlString year <> "] ") maybeYear
+  maybe
+    (HH.text "")
+    (\year -> HH.text $ " [" <> toHtmlString year <> "] ")
+    maybeYear
 
 viewCitations
   :: forall m r
@@ -609,4 +735,108 @@ viewCitations
   => Array Title
   -> H.ParentHTML Query ChildQuery ChildSlot m
 viewCitations citations =
-  HH.text $ " (cited by " <> show (Array.length citations) <> ")"
+  HH.text _text
+  where
+    count = Array.length citations
+    _text = if count == 0 then "" else " (cited by " <> show count <> ")"
+
+renderSegment
+  :: forall m r
+   . MonadAff m
+  => Now m
+  => LogMessages m
+  => RequestArchive m
+  => Either NonMatch Match
+  -> H.ParentHTML Query ChildQuery ChildSlot m
+renderSegment =
+  either
+    HH.text
+    (HH.span [ class_ "highlight" ] <<< Array.singleton <<< HH.text)
+
+toArray :: forall a. List a -> Array a
+toArray list = Array.fromFoldable list
+
+toList :: forall a. Array a -> List a
+toList array = List.fromFoldable array
+
+applyLiveFilterStyle
+  :: forall m
+   . MonadAff m
+  => Now m
+  => LogMessages m
+  => RequestArchive m
+  => Array String
+  -> String
+  -> Array (H.ParentHTML Query ChildQuery ChildSlot m)
+applyLiveFilterStyle needles haystack =
+  toArray $ map renderSegment segments
+  where
+    getSegments :: List String -> String -> List (Either NonMatch Match)
+    getSegments =
+      explode
+        <<< (foldr insertInterval Nil)
+        <<< (filterMap ((_ $ haystack) <<< interval))
+
+    segments :: List (Either NonMatch Match)
+    segments = getSegments (toList needles) haystack
+
+interval :: String -> String -> Maybe (Tuple Int Int)
+interval str0 str1
+  | String.null str0 = Nothing
+  | otherwise = do
+      regex <- hush $ Regex.regex str0 ignoreCase
+      index <- Regex.search regex str1
+      pure $ Tuple index (index + String.length str0)
+
+type Interval a = Tuple a a
+
+insertInterval
+  :: forall a
+   . Ord a
+  => Interval a
+  -> List (Interval a)
+  -> List (Interval a)
+insertInterval x_to_y@(Tuple x y) = case _ of
+  Nil -> (Tuple x y) : Nil
+  Cons (Tuple x' y') zs
+    | y < x'    -> (Tuple x y) : (Tuple x' y') : zs
+    | y' < x    -> (Tuple x' y') : insertInterval x_to_y zs
+    | otherwise -> (Tuple (min x x') (max y y')) : zs
+
+type NonMatch = String
+type Match = String
+
+_slice :: Int -> Int -> String -> String
+_slice i j str = fromMaybe "" $ SCU.slice i j str
+
+explode
+  :: List (Tuple Int Int)
+  -> String
+  -> List (Either NonMatch Match)
+explode intervals str = go 0 intervals
+  where
+  go :: Int -> List (Tuple Int Int) -> List (Either NonMatch Match)
+  go n = case _ of
+    Nil ->
+      let
+        length = String.length str
+      in
+        if n == length
+          then Nil
+          else (Left $ _slice n length str) : Nil
+
+    (Cons (Tuple i j) tail) ->
+      if n < i
+        then (Left  $ _slice n i str)
+               : (Right $ _slice i j str)
+               : (go j tail)
+        else (Right $ _slice i j str)
+             : (go j tail)
+
+_words :: String -> Array String
+_words str
+  | String.null str = []
+  | otherwise       = String.split (Pattern " ") str
+
+words :: String -> Array String
+words = _words <<< String.trim

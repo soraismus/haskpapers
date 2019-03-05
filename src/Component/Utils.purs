@@ -1,5 +1,6 @@
 module HaskPapers.Component.Utils
-  ( getDailyIndex
+  ( afterDuration
+  , getDailyIndex
   ) where
 
 import Prelude
@@ -10,7 +11,10 @@ import Data.Enum (toEnum)
 import Data.Int (fromNumber)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Time.Duration (Days(..))
+import Effect (Effect)
 import HaskPapers.Capability.Now (class Now, nowDate)
+
+foreign import afterDuration :: Int -> Effect Unit -> Effect (Effect Unit)
 
 getDateDiffMaybe :: Date -> Maybe Days
 getDateDiffMaybe date = do
