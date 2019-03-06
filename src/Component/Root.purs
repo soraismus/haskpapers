@@ -87,7 +87,7 @@ type StateRec =
       { title :: String
       , idsForTitle :: Set Id
       , author :: String
-      , authorFacets :: Array { name :: String, titleIds :: Set Id }
+      , facets :: Array { name :: String, titleIds :: Set Id }
       , idsForAuthor :: Set Id
       , includeUnknown :: Boolean
       , minYear :: Year
@@ -117,9 +117,9 @@ data Query a
   | RenderMore (H.SubscribeStatus -> a)
   | FilterByTitle String a
   | FilterByAuthor String a
-  | AddAuthorFacet Author a
-  | AddAuthorFacetFromFilter a
-  | AuthorFacetRemove String a
+  | AddFacet Author a
+  | AddFacetFromFilter a
+  | RemoveFacet String a
   | FilterByYear SliderYears (H.SubscribeStatus -> a)
   | SetIncludeUnknown Boolean a
 
@@ -189,25 +189,25 @@ component =
         , isIrrelevant { author = String.null $ String.trim string }
         }
     pure next
-  eval (AddAuthorFacetFromFilter next) = do
-    logDebug "AddAuthorFacetFromFilter"
+  eval (AddFacetFromFilter next) = do
+    logDebug "AddFacetFromFilter"
     H.modify_ $ updateForFilters \stateRec ->
       let
         filters = stateRec.filters
         name = filters.author
         ids = filters.idsForAuthor
-        facets = filters.authorFacets
+        facets = filters.facets
       in
         if String.null name
           then filters
           else filters { author = ""
                        , idsForAuthor = Set.empty
-                       , authorFacets = getAuthorFacets name ids facets
+                       , facets = getFacets name ids facets
                        , isIrrelevant { facet = false }
                        }
     pure next
-  eval (AddAuthorFacet author next) = do
-    logDebug $ "AddAuthorFacet: " <> show author
+  eval (AddFacet author next) = do
+    logDebug $ "AddFacet: " <> show author
     H.modify_ $ updateForFilters \stateRec ->
       let
         authors = stateRec.authors
@@ -215,12 +215,12 @@ component =
         filters = stateRec.filters
         name = filters.author
         ids = filters.idsForAuthor
-        facets = filters.authorFacets
+        facets = filters.facets
       in
         if inArray (toHtmlString author) $ map _.name facets
           then filters
           else filters
-            { authorFacets =
+            { facets =
                 Array.snoc
                   facets
                   { name: toHtmlString author
@@ -229,8 +229,8 @@ component =
             , isIrrelevant { facet = false }
             }
     pure next
-  eval (AuthorFacetRemove string next) = do
-    logDebug $ "AuthorFacetRemove: " <> string
+  eval (RemoveFacet string next) = do
+    logDebug $ "RemoveFacet: " <> string
     pure next
   eval (FilterByYear sliderYears@(Tuple minYear maxYear) reply) = do
     logDebug $ "FilterByYear -- " <> show sliderYears
@@ -275,12 +275,12 @@ component =
       (H.request RenderMore)
     pure next
 
-getAuthorFacets
+getFacets
   :: String
   -> Set Id
   -> Array { name :: String, titleIds :: Set Id }
   -> Array { name :: String, titleIds :: Set Id }
-getAuthorFacets name ids facets =
+getFacets name ids facets =
   if inArray name $ map _.name facets
     then facets
     else Array.snoc facets { name: name, titleIds: ids }
@@ -406,7 +406,7 @@ convert index { archive, date: WrappedDate _date } =
       { title: ""
       , idsForTitle: ids
       , author: ""
-      , authorFacets: []
+      , facets: []
       , idsForAuthor: ids
       , includeUnknown: true
       , minYear: archive.minYear
@@ -423,7 +423,7 @@ filter
   :: forall r0 r1
    . { idsForAuthor :: Set Id
      , idsForTitle :: Set Id
-     , authorFacets :: Array { titleIds :: Set Id | r0 }
+     , facets :: Array { titleIds :: Set Id | r0 }
      , includeUnknown :: Boolean
      , minYear :: Year
      , maxYear :: Year
@@ -446,7 +446,7 @@ isSelected
   :: forall r0 r1
    . { idsForAuthor :: Set Id
      , idsForTitle :: Set Id
-     , authorFacets :: Array { titleIds :: Set Id | r0 }
+     , facets :: Array { titleIds :: Set Id | r0 }
      , includeUnknown :: Boolean
      , minYear :: Year
      , maxYear :: Year
@@ -458,7 +458,7 @@ isSelected
      }
   -> Paper
   -> Boolean
-isSelected filters@{ authorFacets, includeUnknown, minYear, maxYear } paper =
+isSelected filters@{ facets, includeUnknown, minYear, maxYear } paper =
   let
     id = paper.titleId
 
@@ -471,7 +471,7 @@ isSelected filters@{ authorFacets, includeUnknown, minYear, maxYear } paper =
     isYearSelected
       && (isIrrelevant.title || Set.member id filters.idsForTitle)
       && (isIrrelevant.author || Set.member id filters.idsForAuthor)
-      && (isIrrelevant.facet ||  any (Set.member id <<< _.titleIds) authorFacets)
+      && (isIrrelevant.facet ||  any (Set.member id <<< _.titleIds) facets)
 
 mapState :: (StateRec -> StateRec) -> State -> State
 mapState f (Loaded stateRec) = Loaded $ f stateRec
@@ -482,7 +482,7 @@ updateForFilters
      -> { title :: String
         , idsForTitle :: Set Id
         , author :: String
-        , authorFacets :: Array { name :: String, titleIds :: Set Id }
+        , facets :: Array { name :: String, titleIds :: Set Id }
         , idsForAuthor :: Set Id
         , includeUnknown :: Boolean
         , minYear :: Year
@@ -556,15 +556,15 @@ viewFilters
   => RequestArchive m
   => { title :: String
      , author :: String
-     , authorFacets :: Array { name :: String, titleIds :: Set Id }
+     , facets :: Array { name :: String, titleIds :: Set Id }
      | r
      }
   -> H.ParentHTML Query ChildQuery ChildSlot m
-viewFilters { title, author, authorFacets } =
+viewFilters { title, author, facets } =
   HH.p_
     [ viewTitleSearchBox title
     , viewAuthorSearchBox author
-    , viewAuthorFacets $ map _.name authorFacets
+    , viewFacets $ map _.name facets
     , viewIncludeUnknown
     , HH.div [ HP.id_ "year-slider" ] []
     ]
@@ -624,13 +624,13 @@ viewAuthorSearchBox authorName =
       , HP.type_ InputType.InputText
       , HP.value authorName
       , HE.onValueInput $ HE.input $ FilterByAuthor
-      --, HE.onKeyUp $ HE.input_ AddAuthorFacetFromFilter
+      --, HE.onKeyUp $ HE.input_ AddFacetFromFilter
       ]
     ]
 
 -- keyboardEvent.key == "Enter"
 
-viewAuthorFacet
+viewFacet
   :: forall m
    . MonadAff m
   => Now m
@@ -638,14 +638,14 @@ viewAuthorFacet
   => RequestArchive m
   => String
   -> H.ParentHTML Query ChildQuery ChildSlot m
-viewAuthorFacet facet =
+viewFacet str =
   HH.div
     [ class_ "facet"
-    --, HE.onClick $ HE.input_ AuthorFacetRemove
+    , HE.onClick $ HE.input_ $ RemoveFacet str
     ]
-    [ HH.text facet ]
+    [ HH.text str ]
 
-viewAuthorFacets
+viewFacets
   :: forall m
    . MonadAff m
   => Now m
@@ -653,10 +653,10 @@ viewAuthorFacets
   => RequestArchive m
   => Array String
   -> H.ParentHTML Query ChildQuery ChildSlot m
-viewAuthorFacets authorFacets =
+viewFacets strs =
   HH.div
     [ class_ "facets" ]
-    (map viewAuthorFacet authorFacets)
+    (map viewFacet strs)
 
 viewPaperOfTheDay
   :: forall m
@@ -816,7 +816,7 @@ viewAuthor maybeFilter author =
   in
     HH.span
       [ class_ "author"
-      , HE.onClick $ HE.input_ $ AddAuthorFacet author
+      , HE.onClick $ HE.input_ $ AddFacet author
       ]
       (maybe
         [HH.text str]
