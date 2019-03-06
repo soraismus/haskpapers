@@ -13,7 +13,7 @@ import Data.Array as Array
 import Data.Date (Date)
 import Data.Either (Either(..), hush, either)
 import Data.Either.Nested (Either3)
-import Data.Filterable (filterMap)
+import Data.Filterable (filterMap, maybeBool)
 import Data.Foldable (all, any, foldM, foldr)
 import Data.FoldableWithIndex (foldrWithIndex)
 import Data.Functor.Coproduct.Nested (Coproduct3)
@@ -203,7 +203,7 @@ component =
           else filters { author = ""
                        , idsForAuthor = Set.empty
                        , facets = getFacets name ids facets
-                       , isIrrelevant { facet = false }
+                       , isIrrelevant { author = true, facet = false }
                        }
     pure next
   eval (AddFacet author next) = do
@@ -633,11 +633,23 @@ viewAuthorSearchBox authorName =
       , HP.type_ InputType.InputText
       , HP.value authorName
       , HE.onValueInput $ HE.input $ FilterByAuthor
-      --, HE.onKeyUp $ HE.input_ AddFacetFromFilter
+      , HE.onKeyUp $ (maybeBool isEnter >.> AddFacetFromFilter)
       ]
     ]
 
--- keyboardEvent.key == "Enter"
+isEnter :: KeyboardEvent -> Boolean
+isEnter keyboardEvent = (key keyboardEvent) == "Enter"
+
+pushMap
+  :: forall f g a b
+   . Functor f
+  => (a -> f b)
+  -> (forall c. c -> g c)
+  -> a
+  -> f (g Unit)
+pushMap f g = f >>> \fb -> map (const $ g unit) fb
+
+infixr 5 pushMap as >.>
 
 viewFacet
   :: forall m
