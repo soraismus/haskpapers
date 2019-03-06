@@ -1,15 +1,17 @@
 module HaskPapers.Component.Utils
   ( afterDuration
   , getDailyIndex
+  , inArray
   ) where
 
 import Prelude
 
+import Data.Array (elemIndex)
 import Data.Date (Date, canonicalDate, diff)
 import Data.Date.Component (Month(..))
 import Data.Enum (toEnum)
 import Data.Int (fromNumber)
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.Time.Duration (Days(..))
 import Effect (Effect)
 import HaskPapers.Capability.Now (class Now, nowDate)
@@ -35,3 +37,6 @@ maybeBaseDate = do
   year <- toEnum 2019
   day <- toEnum 1
   pure $ canonicalDate year January day
+
+inArray :: forall a. Eq a => a -> Array a -> Boolean
+inArray x xs = isJust $ elemIndex x xs

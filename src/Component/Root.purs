@@ -15,12 +15,14 @@ import Data.Either (Either(..), hush, either)
 import Data.Either.Nested (Either3)
 import Data.Filterable (filterMap)
 import Data.Foldable (all, any, foldM, foldr)
+import Data.FoldableWithIndex (foldrWithIndex)
 import Data.Functor.Coproduct.Nested (Coproduct3)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.List (List(..), (:))
 import Data.List as List
 import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.Set (Set)
 import Data.Set as Set
@@ -34,7 +36,6 @@ import Data.Tuple (Tuple(..))
 import DOM.HTML.Indexed.InputType as InputType
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff)
-import Effect.Timer (setTimeout)
 import Halogen as H
 import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
@@ -51,7 +52,7 @@ import HaskPapers.Capability.RequestArchive
 import HaskPapers.Component.ComponentA as CA
 import HaskPapers.Component.ComponentB as CB
 import HaskPapers.Component.ComponentC as CC
-import HaskPapers.Component.Utils (afterDuration, getDailyIndex)
+import HaskPapers.Component.Utils (afterDuration, getDailyIndex, inArray)
 import HaskPapers.Component.ViewUtils (class_, padLeft3)
 import HaskPapers.Data.Archive (Archive)
 import HaskPapers.Data.Author (Author)
@@ -77,15 +78,16 @@ type StateRec =
   , ids :: Set Id
   , dailyIndex :: Int
   , authors :: Map Id Author
+  , authorsIndex :: Map Id (Set Id)
   , overallMinYear :: Year
   , overallMaxYear :: Year
-  , authorFacets :: Array { name :: String, titleIds :: Set Id }
   , visibleIds :: Set Id
   , selectedPapers :: Array Paper 
   , filters ::
       { title :: String
       , idsForTitle :: Set Id
       , author :: String
+      , authorFacets :: Array { name :: String, titleIds :: Set Id }
       , idsForAuthor :: Set Id
       , includeUnknown :: Boolean
       , minYear :: Year
@@ -109,13 +111,12 @@ data Query a
   = RequestArchive a
   | DisplayArchive Archive Date a
   | RenderMore (H.SubscribeStatus -> a)
-  | TitleFilter String a
-  | AuthorFilter String a
-  | AuthorFacetAdd a
-  | AuthorFacetAdd_ Author a
+  | FilterByTitle String a
+  | FilterByAuthor String a
+  | AddAuthorFacet Author a
+  | AddAuthorFacetFromFilter a
   | AuthorFacetRemove String a
-  | YearFilter Year Year a
-  | UpdateAccToSlider SliderYears (H.SubscribeStatus -> a)
+  | FilterByYear SliderYears (H.SubscribeStatus -> a)
   | SetIncludeUnknown Boolean a
 
 type ChildQuery = Coproduct3 CA.Query CB.Query CC.Query
@@ -166,36 +167,65 @@ component =
     H.modify_ $ updateForFilters \stateRec ->
       stateRec.filters { renderAmount = RenderAll }
     pure $ reply H.Done
-  eval (TitleFilter string next) = do
-    logDebug $ "TitleFilter: " <> string
+  eval (FilterByTitle string next) = do
+    logDebug $ "FilterByTitle: " <> string
     H.modify_ $ updateForFilters \stateRec ->
       stateRec.filters
         { title = string
         , idsForTitle = getIdsForTitle stateRec.ids string stateRec.papers
         }
     pure next
-  eval (AuthorFilter string next) = do
-    logDebug $ "AuthorFilter: " <> string
+  eval (FilterByAuthor string next) = do
+    logDebug $ "FilterByAuthor: " <> string
     H.modify_ $ updateForFilters \stateRec ->
       stateRec.filters
         { author = string
         , idsForAuthor = getIdsForAuthor stateRec.ids string stateRec.papers
         }
     pure next
-  eval (AuthorFacetAdd next) = do
-    logDebug "AuthorFacetAdd"
+  eval (AddAuthorFacetFromFilter next) = do
+    logDebug "AddAuthorFacetFromFilter"
+    H.modify_ $ updateForFilters \stateRec ->
+      let
+        filters = stateRec.filters
+        name = filters.author
+        ids = filters.idsForAuthor
+        facets = filters.authorFacets
+      in
+        if String.null name
+          then filters
+          else filters { author = ""
+                       , idsForAuthor = Set.empty
+                       , authorFacets = getAuthorFacets name ids facets
+                       }
     pure next
-  eval (AuthorFacetAdd_ author next) = do
-    logDebug $ "AuthorFacetAdd_: " <> show author
+  eval (AddAuthorFacet author next) = do
+    logDebug $ "AddAuthorFacet: " <> show author
+    H.modify_ $ updateForFilters \stateRec ->
+      let
+        authors = stateRec.authors
+        titles = stateRec.authorsIndex
+        filters = stateRec.filters
+        name = filters.author
+        ids = filters.idsForAuthor
+        facets = filters.authorFacets
+      in
+        if inArray (toHtmlString author) $ map _.name facets
+          then filters
+          else filters
+            { authorFacets =
+                Array.snoc
+                  facets
+                  { name: toHtmlString author
+                  , titleIds: buildAuthorFilterIds author authors titles
+                  }
+            }
     pure next
   eval (AuthorFacetRemove string next) = do
     logDebug $ "AuthorFacetRemove: " <> string
     pure next
-  eval (YearFilter minYear maxYear next) = do
-    logDebug $ "YearFilter: " <> show minYear <> ", " <> show maxYear
-    pure next
-  eval (UpdateAccToSlider sliderYears@(Tuple minYear maxYear) reply) = do
-    logDebug $ "UpdateAccToSlider -- " <> show sliderYears
+  eval (FilterByYear sliderYears@(Tuple minYear maxYear) reply) = do
+    logDebug $ "FilterByYear -- " <> show sliderYears
     H.modify_ $ updateForFilters \stateRec ->
       stateRec.filters { minYear = minYear, maxYear = maxYear }
     pure $ reply H.Listening
@@ -231,11 +261,58 @@ component =
     logDebug ("RequestArchive -- " <> show slider)
     H.subscribe $ eventSource'
       (onSliderUpdate slider)
-      (Just <<< H.request <<< UpdateAccToSlider)
+      (Just <<< H.request <<< FilterByYear)
     H.subscribe $ eventSource_'
-      (afterDuration 3000)
+      (afterDuration 750)
       (H.request RenderMore)
     pure next
+
+getAuthorFacets
+  :: String
+  -> Set Id
+  -> Array { name :: String, titleIds :: Set Id }
+  -> Array { name :: String, titleIds :: Set Id }
+getAuthorFacets name ids facets =
+  if inArray name $ map _.name facets
+    then facets
+    else Array.snoc facets { name: name, titleIds: ids }
+
+buildAuthorFilterIds
+  :: Author
+  -> Map Id Author
+  -> Map Id (Set Id)
+  -> Set Id
+buildAuthorFilterIds author authors authorsIndex
+  | String.null $ String.trim $ toHtmlString author = Set.empty
+  | otherwise =
+      either (const Set.empty) identity do
+        regexes <- getRegexes $ toHtmlString author
+        let _reduce = reduce regexes
+        pure $ foldrWithIndex _reduce Set.empty authors
+  where
+    _getRegexes :: Array String -> Either String (List Regex)
+    _getRegexes =
+      foldM
+        (\regexes str -> case Regex.regex str ignoreCase of
+            Left error -> Left $ "Error on '" <> str <> "': " <> error
+            Right regex -> Right $ (regex : regexes))
+        Nil
+
+    getRegexes :: String -> Either String (List Regex)
+    getRegexes = _getRegexes <<< words
+
+    -- NB: I think this is intended for a binominal/trinominal author.
+    match :: List Regex -> String -> Boolean
+    match regexes fullName =
+      all (\regex -> Regex.test regex fullName) regexes
+
+    reduce :: List Regex -> Id -> Author -> Set Id -> Set Id
+    reduce regexes id author ids =
+      if match regexes $ toHtmlString author
+        then case Map.lookup id authorsIndex of
+          Nothing -> ids
+          Just _ids -> Set.union ids _ids
+        else ids
 
 getIdsForTitle :: Set Id -> String -> Array Paper -> Set Id
 getIdsForTitle ids str papers
@@ -309,18 +386,19 @@ convert index { archive, date: WrappedDate _date } =
   in
     { now: _date
     , authors: archive.authors
+    , authorsIndex: archive.authorsIndex
     , dailyIndex: index
     , papers: archive.papers
     , ids
     , overallMinYear: archive.minYear
     , overallMaxYear: archive.maxYear
-    , authorFacets: []
     , visibleIds: Set.empty
     , selectedPapers: archive.papers
     , filters:
       { title: ""
       , idsForTitle: ids
       , author: ""
+      , authorFacets: []
       , idsForAuthor: ids
       , includeUnknown: true
       , minYear: archive.minYear
@@ -377,6 +455,7 @@ updateForFilters
      -> { title :: String
         , idsForTitle :: Set Id
         , author :: String
+        , authorFacets :: Array { name :: String, titleIds :: Set Id }
         , idsForAuthor :: Set Id
         , includeUnknown :: Boolean
         , minYear :: Year
@@ -411,7 +490,7 @@ view stateRec@{ dailyIndex, papers, selectedPapers } =
     [ class_ "container" ]
     [ viewHeader $ Array.length selectedPapers
     , viewPaperOfTheDay dailyIndex papers
-    , viewFilters stateRec
+    , viewFilters stateRec.filters
     , viewPapers stateRec
     ]
 
@@ -439,20 +518,21 @@ viewHeader n =
     ]
 
 viewFilters
-  :: forall m r0 r1
+  :: forall m r
    . MonadAff m
   => Now m
   => LogMessages m
   => RequestArchive m
-  => { authorFacets :: Array { name :: String, titleIds :: Set Id }
-     , filters :: { title :: String, author :: String | r1 }
-     | r0
+  => { title :: String
+     , author :: String
+     , authorFacets :: Array { name :: String, titleIds :: Set Id }
+     | r
      }
   -> H.ParentHTML Query ChildQuery ChildSlot m
-viewFilters { authorFacets, filters } =
+viewFilters { title, author, authorFacets } =
   HH.p_
-    [ viewTitleSearchBox filters.title
-    , viewAuthorSearchBox filters.author
+    [ viewTitleSearchBox title
+    , viewAuthorSearchBox author
     , viewAuthorFacets $ map _.name authorFacets
     , viewIncludeUnknown
     , HH.div [ HP.id_ "year-slider" ] []
@@ -492,7 +572,7 @@ viewTitleSearchBox filter =
       , HP.placeholder "Search titles"
       , HP.type_ InputType.InputText
       , HP.value filter
-      , HE.onValueInput $ HE.input TitleFilter
+      , HE.onValueInput $ HE.input FilterByTitle
       ]
     ]
 
@@ -512,8 +592,8 @@ viewAuthorSearchBox authorName =
       , HP.placeholder "Search authors"
       , HP.type_ InputType.InputText
       , HP.value authorName
-      , HE.onValueInput $ HE.input $ AuthorFilter
-      , HE.onKeyUp $ HE.input_ AuthorFacetAdd
+      , HE.onValueInput $ HE.input $ FilterByAuthor
+      --, HE.onKeyUp $ HE.input_ AddAuthorFacetFromFilter
       ]
     ]
 
@@ -705,7 +785,7 @@ viewAuthor maybeFilter author =
   in
     HH.span
       [ class_ "author"
-      , HE.onClick $ HE.input_ $ AuthorFacetAdd_ author
+      , HE.onClick $ HE.input_ $ AddAuthorFacet author
       ]
       (maybe
         [HH.text str]
