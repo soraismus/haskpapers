@@ -1,22 +1,32 @@
 module HaskPapers.Component.Utils
   ( afterDuration
+  , deleteWhen
   , getDailyIndex
   , inArray
   ) where
 
 import Prelude
 
-import Data.Array (elemIndex)
+import Data.Array (deleteAt, elemIndex, findIndex)
 import Data.Date (Date, canonicalDate, diff)
 import Data.Date.Component (Month(..))
 import Data.Enum (toEnum)
 import Data.Int (fromNumber)
-import Data.Maybe (Maybe(..), fromMaybe, isJust)
+import Data.Maybe (Maybe(..), fromJust, fromMaybe, isJust, maybe)
 import Data.Time.Duration (Days(..))
 import Effect (Effect)
 import HaskPapers.Capability.Now (class Now, nowDate)
+import Partial.Unsafe (unsafePartial)
 
 foreign import afterDuration :: Int -> Effect Unit -> Effect (Effect Unit)
+
+deleteWhen :: forall a. (a -> Boolean) -> Array a -> Array a
+deleteWhen _ [] = []
+deleteWhen f xs =
+  maybe
+    xs
+    (\i -> unsafePartial $ fromJust (deleteAt i xs))
+    (findIndex f xs)
 
 getDateDiffMaybe :: Date -> Maybe Days
 getDateDiffMaybe date = do

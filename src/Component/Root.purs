@@ -52,7 +52,12 @@ import HaskPapers.Capability.RequestArchive
 import HaskPapers.Component.ComponentA as CA
 import HaskPapers.Component.ComponentB as CB
 import HaskPapers.Component.ComponentC as CC
-import HaskPapers.Component.Utils (afterDuration, getDailyIndex, inArray)
+import HaskPapers.Component.Utils
+  ( afterDuration
+  , deleteWhen
+  , getDailyIndex
+  , inArray
+  )
 import HaskPapers.Component.ViewUtils (class_, padLeft3)
 import HaskPapers.Data.Archive (Archive)
 import HaskPapers.Data.Author (Author)
@@ -113,7 +118,6 @@ instance showState :: Show State where
 
 data Query a
   = RequestArchive a
-  | DisplayArchive Archive Date a
   | RenderMore (H.SubscribeStatus -> a)
   | FilterByTitle String a
   | FilterByAuthor String a
@@ -163,9 +167,6 @@ component =
     requestArchive >>= case _ of
       Just response -> evalResponse response next
       Nothing       -> H.put LoadError *> pure next
-  eval (DisplayArchive archive date next) = do
-    logDebug $ "DisplayArchive: " <> show date <> "; " <> show archive
-    pure next
   eval (RenderMore reply) = do
     logDebug "RenderMore"
     H.modify_ $ updateForFilters \stateRec ->
@@ -231,6 +232,16 @@ component =
     pure next
   eval (RemoveFacet string next) = do
     logDebug $ "RemoveFacet: " <> string
+    H.modify_ $ updateForFilters \stateRec ->
+      let
+        filters = stateRec.filters
+        facets = filters.facets
+      in if inArray string $ map _.name facets
+        then filters
+          { facets = deleteWhen ((_ == string) <<< _.name) facets
+          , isIrrelevant { facet = Array.length facets == 1 }
+          }
+        else filters
     pure next
   eval (FilterByYear sliderYears@(Tuple minYear maxYear) reply) = do
     logDebug $ "FilterByYear -- " <> show sliderYears
