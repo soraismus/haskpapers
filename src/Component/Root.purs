@@ -86,7 +86,6 @@ type StateRec =
   , authorsIndex :: Map Id (Set Id)
   , overallMinYear :: Year
   , overallMaxYear :: Year
-  , visibleIds :: Set Id
   , selectedPapers :: Array Paper 
   , filters ::
       { title :: String
@@ -318,7 +317,7 @@ buildAuthorFilterIds author authors authorsIndex
         Nil
 
     getRegexes :: String -> Either String (List Regex)
-    getRegexes = _getRegexes <<< words
+    getRegexes = _getRegexes <<< split
 
     -- NB: I think this is intended for a binominal/trinominal author.
     match :: List Regex -> String -> Boolean
@@ -351,7 +350,7 @@ getIdsForTitle ids str papers
         Nil
 
     getRegexes :: String -> Either String (List Regex)
-    getRegexes = _getRegexes <<< words
+    getRegexes = _getRegexes <<< split
 
     reduce :: List Regex -> Paper -> Set Id -> Set Id
     reduce regexes paper ids =
@@ -378,7 +377,7 @@ getIdsForAuthor ids str papers
         Nil
 
     getRegexes :: String -> Either String (List Regex)
-    getRegexes = _getRegexes <<< words
+    getRegexes = _getRegexes <<< split
 
     match :: List Regex -> Array Author -> Boolean
     match regexes authors =
@@ -411,7 +410,6 @@ convert index { archive, date: WrappedDate _date } =
     , ids
     , overallMinYear: archive.minYear
     , overallMaxYear: archive.maxYear
-    , visibleIds: Set.empty
     , selectedPapers: archive.papers
     , filters:
       { title: ""
@@ -770,7 +768,7 @@ viewTitle title maybeLink maybeFilter =
   where
     titleNodes = maybe
       [HH.text $ toHtmlString title]
-      (\filter -> applyLiveFilterStyle (words filter) $ toHtmlString title)
+      (\filter -> highlightPatches (split filter) $ toHtmlString title)
       maybeFilter
     linkNodes = maybe
       titleNodes
@@ -831,7 +829,7 @@ viewAuthor maybeFilter author =
       ]
       (maybe
         [HH.text str]
-        (\filter -> applyLiveFilterStyle (words filter) str)
+        (\filter -> highlightPatches (split filter) str)
         maybeFilter)
 
 viewYearMaybe
@@ -881,7 +879,7 @@ toArray list = Array.fromFoldable list
 toList :: forall a. Array a -> List a
 toList array = List.fromFoldable array
 
-applyLiveFilterStyle
+highlightPatches
   :: forall m
    . MonadAff m
   => Now m
@@ -890,7 +888,7 @@ applyLiveFilterStyle
   => Array String
   -> String
   -> Array (H.ParentHTML Query ChildQuery ChildSlot m)
-applyLiveFilterStyle needles haystack =
+highlightPatches needles haystack =
   toArray $ map renderSegment segments
   where
     getSegments :: List String -> String -> List (Either NonMatch Match)
@@ -955,10 +953,10 @@ explode intervals str = go 0 intervals
         else (Right $ _slice i j str)
              : (go j tail)
 
-_words :: String -> Array String
-_words str
+_split :: String -> Array String
+_split str
   | String.null str = []
   | otherwise       = String.split (Pattern " ") str
 
-words :: String -> Array String
-words = _words <<< String.trim
+split :: String -> Array String
+split = _split <<< String.trim
