@@ -93,6 +93,10 @@ type StateRec =
       , minYear :: Year
       , maxYear :: Year
       , renderAmount :: RenderAmount
+      , isIrrelevant :: { title :: Boolean
+                        , author :: Boolean
+                        , facet :: Boolean
+                        }
       }
   }
 
@@ -173,6 +177,7 @@ component =
       stateRec.filters
         { title = string
         , idsForTitle = getIdsForTitle stateRec.ids string stateRec.papers
+        , isIrrelevant { title = String.null $ String.trim string }
         }
     pure next
   eval (FilterByAuthor string next) = do
@@ -181,6 +186,7 @@ component =
       stateRec.filters
         { author = string
         , idsForAuthor = getIdsForAuthor stateRec.ids string stateRec.papers
+        , isIrrelevant { author = String.null $ String.trim string }
         }
     pure next
   eval (AddAuthorFacetFromFilter next) = do
@@ -197,6 +203,7 @@ component =
           else filters { author = ""
                        , idsForAuthor = Set.empty
                        , authorFacets = getAuthorFacets name ids facets
+                       , isIrrelevant { facet = false }
                        }
     pure next
   eval (AddAuthorFacet author next) = do
@@ -219,6 +226,7 @@ component =
                   { name: toHtmlString author
                   , titleIds: buildAuthorFilterIds author authors titles
                   }
+            , isIrrelevant { facet = false }
             }
     pure next
   eval (AuthorFacetRemove string next) = do
@@ -404,18 +412,27 @@ convert index { archive, date: WrappedDate _date } =
       , minYear: archive.minYear
       , maxYear: archive.maxYear
       , renderAmount: RenderSome
+      , isIrrelevant: { title: true
+                      , author: true
+                      , facet: true
+                      }
       }
     }
 
 filter
-  :: forall r
+  :: forall r0 r1
    . { idsForAuthor :: Set Id
      , idsForTitle :: Set Id
+     , authorFacets :: Array { titleIds :: Set Id | r0 }
      , includeUnknown :: Boolean
      , minYear :: Year
      , maxYear :: Year
      , renderAmount :: RenderAmount
-     | r
+     , isIrrelevant :: { title :: Boolean
+                       , author :: Boolean
+                       , facet :: Boolean
+                       }
+     | r1
      }
   -> Array Paper
   -> Array Paper
@@ -426,25 +443,35 @@ filter record@{ renderAmount } = case renderAmount of
     _filter = Array.filter $ isSelected record
 
 isSelected
-  :: forall r
+  :: forall r0 r1
    . { idsForAuthor :: Set Id
      , idsForTitle :: Set Id
+     , authorFacets :: Array { titleIds :: Set Id | r0 }
      , includeUnknown :: Boolean
      , minYear :: Year
      , maxYear :: Year
-     | r
+     , isIrrelevant :: { title :: Boolean
+                       , author :: Boolean
+                       , facet :: Boolean
+                       }
+     | r1
      }
   -> Paper
   -> Boolean
-isSelected filters@{ includeUnknown, minYear, maxYear } paper =
+isSelected filters@{ authorFacets, includeUnknown, minYear, maxYear } paper =
   let
+    id = paper.titleId
+
+    isIrrelevant = filters.isIrrelevant
+
     isYearSelected = maybe includeUnknown
       (\year -> year >= minYear && year <= maxYear)
       paper.yearMaybe
   in
     isYearSelected
-      && Set.member paper.titleId filters.idsForTitle
-      && Set.member paper.titleId filters.idsForAuthor
+      && (isIrrelevant.title || Set.member id filters.idsForTitle)
+      && (isIrrelevant.author || Set.member id filters.idsForAuthor)
+      && (isIrrelevant.facet ||  any (Set.member id <<< _.titleIds) authorFacets)
 
 mapState :: (StateRec -> StateRec) -> State -> State
 mapState f (Loaded stateRec) = Loaded $ f stateRec
@@ -461,6 +488,10 @@ updateForFilters
         , minYear :: Year
         , maxYear :: Year
         , renderAmount :: RenderAmount
+        , isIrrelevant :: { title :: Boolean
+                          , author :: Boolean
+                          , facet :: Boolean
+                          }
         }
      )
   -> State
