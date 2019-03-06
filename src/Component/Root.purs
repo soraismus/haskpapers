@@ -480,7 +480,7 @@ isSelected filters@{ facets, includeUnknown, minYear, maxYear } paper =
     isYearSelected
       && (isIrrelevant.title || Set.member id filters.idsForTitle)
       && (isIrrelevant.author || Set.member id filters.idsForAuthor)
-      && (isIrrelevant.facet ||  any (Set.member id <<< _.titleIds) facets)
+      && (isIrrelevant.facet ||  all (Set.member id <<< _.titleIds) facets)
 
 mapState :: (StateRec -> StateRec) -> State -> State
 mapState f (Loaded stateRec) = Loaded $ f stateRec
